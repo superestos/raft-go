@@ -27,6 +27,8 @@ import "math/rand"
 import "bytes"
 import "6.824/labgob"
 
+//import "fmt"
+
 const minTimeout = 250
 const heartBeatTime = 150
 const waitResultTime = 50
@@ -92,6 +94,8 @@ type Raft struct {
 
 	lastIncludedIndex int
 	lastIncludedTerm int
+
+	snapshot []byte
 }
 
 // return currentTerm and whether this server
@@ -126,13 +130,6 @@ type PersistedState struct {
 //
 func (rf *Raft) persist() {
 	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
@@ -151,18 +148,6 @@ func (rf *Raft) readPersist(data []byte) {
 		return
 	}
 	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
 
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
@@ -193,7 +178,28 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
+	lastIncludedIndex := 0
+	
+	if rf.lastApplied > index {
+		lastIncludedIndex = index
+	} else {
+		lastIncludedIndex = rf.lastApplied
+	}
+
+	rf.snapshot = snapshot
+	rf.lastIncludedTerm = rf.logTerm(lastIncludedIndex)
+
+	for i := rf.lastIncludedIndex + 1; i <= lastIncludedIndex; i++ {
+		delete(rf.log, i)
+	}
+
+	rf.lastIncludedIndex = lastIncludedIndex
+
+	rf.persist()
+	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 }
 
 
@@ -370,7 +376,10 @@ func (rf *Raft) applyStateMachine() {
 		msg.CommandValid = true
 		msg.Command = rf.log[rf.lastApplied].Command
 		msg.CommandIndex = rf.lastApplied
+
+		rf.mu.Unlock()
 		rf.applyCh <- msg
+		rf.mu.Lock()
 	}
 }
 
