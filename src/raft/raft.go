@@ -24,8 +24,8 @@ import "6.824/labrpc"
 import "time"
 import "math/rand"
 
-// import "bytes"
-// import "6.824/labgob"
+import "bytes"
+import "6.824/labgob"
 
 const minTimeout = 250
 const heartBeatTime = 150
@@ -112,6 +112,13 @@ func (rf *Raft) logTerm(index int) int {
 	}
 }
 
+type PersistedState struct {
+	CurrentTerm int
+	VotedFor int
+	LastLogIndex int
+	Log map[int]LogEntries
+}
+
 //
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
@@ -126,6 +133,13 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	state := PersistedState{rf.currentTerm, rf.votedFor, rf.lastLogIndex, rf.log}
+	e.Encode(state)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 
@@ -149,6 +163,16 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	state := PersistedState{}
+	d.Decode(&state)
+
+	rf.currentTerm = state.CurrentTerm
+	rf.votedFor = state.VotedFor
+	rf.lastLogIndex = state.LastLogIndex
+	rf.log = state.Log
 }
 
 
