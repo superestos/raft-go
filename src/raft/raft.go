@@ -168,7 +168,13 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 
 	// Your code here (2D).
+	rf.mu.Lock()
+	if lastIncludedIndex <= rf.lastIncludedIndex {
+		return false
+	}
+	rf.mu.Unlock()
 
+	rf.Snapshot(lastIncludedIndex, snapshot)
 	return true
 }
 
@@ -181,22 +187,14 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	lastIncludedIndex := 0
-	
-	if rf.lastApplied > index {
-		lastIncludedIndex = index
-	} else {
-		lastIncludedIndex = rf.lastApplied
-	}
-
 	rf.snapshot = snapshot
-	rf.lastIncludedTerm = rf.logTerm(lastIncludedIndex)
+	rf.lastIncludedTerm = rf.logTerm(index)
 
-	for i := rf.lastIncludedIndex + 1; i <= lastIncludedIndex; i++ {
+	for i := rf.lastIncludedIndex + 1; i <= index; i++ {
 		delete(rf.log, i)
 	}
 
-	rf.lastIncludedIndex = lastIncludedIndex
+	rf.lastIncludedIndex = index
 
 	rf.persist()
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
