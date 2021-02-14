@@ -75,7 +75,8 @@ type Raft struct {
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
-	applyCh	  chan ApplyMsg		  // Message channel to the client
+	applyCh chan ApplyMsg		  // Message channel to the client
+	notifyApply chan bool
 
 	latestCall time.Time
 
@@ -325,6 +326,45 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	go rf.applyStateMachine()
 }
 
+type InstallSnapshotArgs struct {
+	Term int
+	LeaderId int
+
+	LastIncludedIndex int
+	LastIncludedTerm int
+
+	Data []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int
+}
+
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
+	rf.mu.Lock()
+	
+	reply.Term = rf.currentTerm
+
+	if args.Term < rf.currentTerm {
+		return
+	}
+
+	rf.becomeFollower(args.Term, args.LeaderId)
+	rf.latestCall = time.Now()
+
+	rf.mu.Unlock()
+
+	if rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data) {
+		msg := ApplyMsg{}
+		msg.SnapshotValid = true
+		msg.SnapshotTerm = args.LastIncludedTerm
+		msg.SnapshotIndex = args.LastIncludedTerm
+		msg.Snapshot = args.Data
+		rf.applyCh <- msg
+	}
+
+}
+
 //
 // example code to send a RequestVote RPC to a server.
 // server is the index of the target server in rf.peers[].
@@ -361,6 +401,11 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
+}
+
+func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
 	return ok
 }
 
@@ -409,6 +454,10 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	if reply.Term > rf.currentTerm {
+		rf.becomeFollower(reply.Term, -1)
+	}
+
 	if !rf.isLeader {
 		return
 	}
@@ -425,21 +474,43 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 			go rf.handleAppendEntries(server, &newArgs)
 		}
 	} else if ok {
-		if reply.Term > rf.currentTerm {
-			rf.becomeFollower(reply.Term, -1)
+		rf.nextIndex[server] = reply.ConflictIndex
+		
+		if rf.nextIndex[server] > rf.lastIncludedIndex {
+			newArgs := rf.makeAppendEntriesArgs(reply.ConflictIndex - 1, 0)
+			go rf.handleAppendEntries(server, &newArgs)
 		} else {
-			rf.nextIndex[server] = reply.ConflictIndex
-			
-			if rf.nextIndex[server] > rf.lastIncludedIndex {
-				newArgs := rf.makeAppendEntriesArgs(reply.ConflictIndex - 1, 0)
-				go rf.handleAppendEntries(server, &newArgs)
-			}
-			/* else {
-				go rf.handleInstallSnapshot(server)
-			}
-			*/
+			go rf.handleInstallSnapshot(server)
 		}
 	}	
+}
+
+func (rf *Raft) handleInstallSnapshot(server int) {
+	rf.mu.Lock()
+	args := InstallSnapshotArgs{rf.currentTerm, rf.me, rf.lastIncludedIndex, rf.lastIncludedTerm, rf.persister.ReadSnapshot()}
+	rf.mu.Unlock()
+
+	reply := InstallSnapshotReply{}
+	ok := rf.sendInstallSnapshot(server, &args, &reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if reply.Term > rf.currentTerm {
+		rf.becomeFollower(reply.Term, -1)
+	}
+
+	if !rf.isLeader || !ok {
+		return
+	}
+
+	rf.nextIndex[server] = args.LastIncludedIndex + 1
+	rf.matchIndex[server] = args.LastIncludedIndex
+
+	if rf.nextIndex[server] <= rf.lastLogIndex {
+		newArgs := rf.makeAppendEntriesArgs(rf.matchIndex[server], rf.lastLogIndex - rf.matchIndex[server])
+		go rf.handleAppendEntries(server, &newArgs)
+	}
 }
 
 func (rf *Raft) updateLeaderCommit() {
