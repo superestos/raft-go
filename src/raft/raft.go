@@ -120,8 +120,6 @@ func (rf *Raft) logTerm(index int) int {
 type PersistedState struct {
 	CurrentTerm int
 	VotedFor int
-	LastIncludedTerm int
-	LastIncludedIndex int
 	LastLogIndex int
 	Log map[int]LogEntries
 }
@@ -136,7 +134,7 @@ func (rf *Raft) persist() {
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	state := PersistedState{rf.currentTerm, rf.votedFor, rf.lastIncludedTerm, rf.lastIncludedIndex, rf.lastLogIndex, rf.log}
+	state := PersistedState{rf.currentTerm, rf.votedFor, rf.lastLogIndex, rf.log}
 	e.Encode(state)
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
@@ -159,8 +157,6 @@ func (rf *Raft) readPersist(data []byte) {
 
 	rf.currentTerm = state.CurrentTerm
 	rf.votedFor = state.VotedFor
-	rf.lastIncludedTerm = state.LastIncludedTerm
-	rf.lastIncludedIndex = state.LastIncludedIndex
 	rf.lastLogIndex = state.LastLogIndex
 	rf.log = state.Log
 	rf.snapshot = rf.persister.ReadSnapshot()
@@ -334,8 +330,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.commitIndex = args.LeaderCommit
 		}
 	}
-
-	//go rf.applyStateMachine()
 }
 
 type InstallSnapshotArgs struct {
@@ -354,14 +348,8 @@ type InstallSnapshotReply struct {
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
-
-	defer func() {
-		rf.mu.Unlock()
-		rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
-	}()
 	
 	reply.Term = rf.currentTerm
-
 	if args.Term < rf.currentTerm {
 		return
 	}
@@ -370,12 +358,14 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	update := args.LastIncludedTerm > rf.lastIncludedTerm || (args.LastIncludedTerm == rf.lastIncludedTerm && args.LastIncludedIndex > rf.lastIncludedIndex)
 	if !update {
+		rf.mu.Unlock()
 		return
 	}
 
 	rf.latestCall = time.Now()
 
-	
+	rf.mu.Unlock()
+	rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
 }
 
 //
@@ -472,7 +462,6 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 
 		rf.updateLeaderCommit()
-		//go rf.applyStateMachine()
 
 		if rf.nextIndex[server] <= rf.lastLogIndex {
 			rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
