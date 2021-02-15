@@ -32,6 +32,7 @@ import "6.824/labgob"
 const minTimeout = 250
 const heartBeatTime = 150
 const waitResultTime = 50
+const applyInterval = 5
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -324,7 +325,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 
-	go rf.applyStateMachine()
+	//go rf.applyStateMachine()
 }
 
 type InstallSnapshotArgs struct {
@@ -410,23 +411,6 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 	return ok
 }
 
-func (rf *Raft) applyStateMachine() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	for rf.commitIndex > rf.lastApplied {
-		rf.lastApplied += 1
-		msg := ApplyMsg{}
-		msg.CommandValid = true
-		msg.Command = rf.log[rf.lastApplied].Command
-		msg.CommandIndex = rf.lastApplied
-
-		//rf.mu.Unlock()
-		rf.applyCh <- msg
-		//rf.mu.Lock()
-	}
-}
-
 // lock hold
 func (rf *Raft) makeAppendEntriesArgs(prevLogIndex int, numEntries int) AppendEntriesArgs {
 	args := AppendEntriesArgs{}
@@ -469,7 +453,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 
 		rf.updateLeaderCommit()
-		go rf.applyStateMachine()
+		//go rf.applyStateMachine()
 
 		if rf.nextIndex[server] <= rf.lastLogIndex {
 			newArgs := rf.makeAppendEntriesArgs(rf.matchIndex[server], rf.lastLogIndex - rf.matchIndex[server])
@@ -719,6 +703,26 @@ func (rf *Raft) ticker() {
 	}
 }
 
+func (rf *Raft) applyStateMachine() {
+	for rf.killed() == false {
+		rf.mu.Lock()
+		for rf.commitIndex > rf.lastApplied {
+			rf.lastApplied += 1
+			msg := ApplyMsg{}
+			msg.CommandValid = true
+			msg.Command = rf.log[rf.lastApplied].Command
+			msg.CommandIndex = rf.lastApplied
+
+			rf.mu.Unlock()
+			rf.applyCh <- msg
+			rf.mu.Lock()
+		}
+		rf.mu.Unlock()
+
+		time.Sleep(applyInterval * time.Millisecond)
+	}
+}
+
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -759,7 +763,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
-
+	go rf.applyStateMachine()
 
 	return rf
 }
