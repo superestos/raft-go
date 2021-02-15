@@ -442,6 +442,15 @@ func (rf *Raft) makeAppendEntriesArgs(prevLogIndex int, numEntries int) AppendEn
 	return args
 }
 
+func (rf *Raft) appendMatchedLog(server int, numEntries int) {
+	if rf.nextIndex[server] > rf.lastIncludedIndex {
+		newArgs := rf.makeAppendEntriesArgs(rf.nextIndex[server] - 1, numEntries)
+		go rf.handleAppendEntries(server, &newArgs)
+	} else {
+		go rf.handleInstallSnapshot(server)
+	}
+}
+
 // receive append entries reply
 func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 	reply := AppendEntriesReply{}
@@ -466,8 +475,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		//go rf.applyStateMachine()
 
 		if rf.nextIndex[server] <= rf.lastLogIndex {
-			newArgs := rf.makeAppendEntriesArgs(rf.matchIndex[server], rf.lastLogIndex - rf.matchIndex[server])
-			go rf.handleAppendEntries(server, &newArgs)
+			rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
 		}
 	} else if ok {
 		rf.nextIndex[server] = reply.ConflictIndex
@@ -480,14 +488,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 			}
 		}
 
-		if rf.nextIndex[server] > rf.lastIncludedIndex {
-			newArgs := rf.makeAppendEntriesArgs(rf.nextIndex[server] - 1, 0)
-			go rf.handleAppendEntries(server, &newArgs)
-		
-		} else {
-			go rf.handleInstallSnapshot(server)
-		}
-		
+		rf.appendMatchedLog(server, 0)
 	}	
 }
 
@@ -514,8 +515,7 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 	rf.matchIndex[server] = args.LastIncludedIndex
 
 	if rf.nextIndex[server] <= rf.lastLogIndex {
-		newArgs := rf.makeAppendEntriesArgs(rf.matchIndex[server], rf.lastLogIndex - rf.matchIndex[server])
-		go rf.handleAppendEntries(server, &newArgs)
+		rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
 	}
 }
 
