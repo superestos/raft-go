@@ -176,11 +176,6 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// Your code here (2D).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
-	update := lastIncludedTerm > rf.lastIncludedTerm || (lastIncludedTerm == rf.lastIncludedTerm && lastIncludedIndex > rf.lastIncludedIndex)
-	if !update {
-		return false
-	}
 	
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
@@ -188,6 +183,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		delete(rf.log, i)
 	}
 	rf.lastIncludedIndex = lastIncludedIndex
+	rf.lastLogIndex = lastIncludedIndex
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 	rf.persist()
@@ -300,9 +296,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 	
-	if rf.currentTerm <= args.Term {
-		rf.becomeFollower(args.Term, args.LeaderId)
-	}
+	rf.becomeFollower(args.Term, args.LeaderId)
 
 	if rf.lastLogIndex < args.PrevLogIndex {
 		reply.Success = false
@@ -360,6 +354,11 @@ type InstallSnapshotReply struct {
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
+
+	defer func() {
+		rf.mu.Unlock()
+		rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
+	}()
 	
 	reply.Term = rf.currentTerm
 
@@ -368,20 +367,15 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 
 	rf.becomeFollower(args.Term, args.LeaderId)
+
+	update := args.LastIncludedTerm > rf.lastIncludedTerm || (args.LastIncludedTerm == rf.lastIncludedTerm && args.LastIncludedIndex > rf.lastIncludedIndex)
+	if !update {
+		return
+	}
+
 	rf.latestCall = time.Now()
 
-	rf.mu.Unlock()
-	/*
-	if rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data) {
-		msg := ApplyMsg{}
-		msg.SnapshotValid = true
-		msg.SnapshotTerm = args.LastIncludedTerm
-		msg.SnapshotIndex = args.LastIncludedTerm
-		msg.Snapshot = args.Data
-		rf.applyCh <- msg
-	}
-	*/
-	rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
+	
 }
 
 //
