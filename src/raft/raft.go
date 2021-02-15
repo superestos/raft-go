@@ -120,6 +120,8 @@ func (rf *Raft) logTerm(index int) int {
 type PersistedState struct {
 	CurrentTerm int
 	VotedFor int
+	LastIncludedTerm int
+	LastIncludedIndex int
 	LastLogIndex int
 	Log map[int]LogEntries
 }
@@ -134,7 +136,7 @@ func (rf *Raft) persist() {
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	state := PersistedState{rf.currentTerm, rf.votedFor, rf.lastLogIndex, rf.log}
+	state := PersistedState{rf.currentTerm, rf.votedFor, rf.lastIncludedTerm, rf.lastIncludedIndex, rf.lastLogIndex, rf.log}
 	e.Encode(state)
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
@@ -157,8 +159,11 @@ func (rf *Raft) readPersist(data []byte) {
 
 	rf.currentTerm = state.CurrentTerm
 	rf.votedFor = state.VotedFor
+	rf.lastIncludedTerm = state.LastIncludedTerm
+	rf.lastIncludedIndex = state.LastIncludedIndex
 	rf.lastLogIndex = state.LastLogIndex
 	rf.log = state.Log
+	rf.snapshot = rf.persister.ReadSnapshot()
 }
 
 
@@ -170,12 +175,23 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 
 	// Your code here (2D).
 	rf.mu.Lock()
-	if lastIncludedIndex <= rf.lastIncludedIndex {
+	defer rf.mu.Unlock()
+
+	update := lastIncludedTerm > rf.lastIncludedTerm || (lastIncludedTerm == rf.lastIncludedTerm && lastIncludedIndex > rf.lastIncludedIndex)
+	if !update {
 		return false
 	}
-	rf.mu.Unlock()
+	
+	rf.snapshot = snapshot
+	rf.lastIncludedTerm = lastIncludedTerm
+	for i := rf.lastIncludedIndex + 1; i <= lastIncludedIndex; i++ {
+		delete(rf.log, i)
+	}
+	rf.lastIncludedIndex = lastIncludedIndex
 
-	rf.Snapshot(lastIncludedIndex, snapshot)
+	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
+	rf.persist()
+	
 	return true
 }
 
@@ -188,17 +204,17 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	lastIncludedIndex := rf.lastIncludedIndex
+
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = rf.logTerm(index)
-
-	for i := rf.lastIncludedIndex + 1; i <= index; i++ {
+	rf.lastIncludedIndex = index
+	for i := lastIncludedIndex + 1; i <= index; i++ {
 		delete(rf.log, i)
 	}
 
-	rf.lastIncludedIndex = index
-
-	rf.persist()
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
+	rf.persist()
 }
 
 
@@ -355,7 +371,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.latestCall = time.Now()
 
 	rf.mu.Unlock()
-
+	/*
 	if rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data) {
 		msg := ApplyMsg{}
 		msg.SnapshotValid = true
@@ -364,7 +380,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		msg.Snapshot = args.Data
 		rf.applyCh <- msg
 	}
-
+	*/
+	rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
 }
 
 //
@@ -439,9 +456,8 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if ok && reply.Term > rf.currentTerm {
+	if reply.Term > rf.currentTerm {
 		rf.becomeFollower(reply.Term, -1)
-		return
 	}
 
 	if !rf.isLeader {
@@ -470,14 +486,14 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 			}
 		}
 
-		//if rf.nextIndex[server] > rf.lastIncludedIndex {
+		if rf.nextIndex[server] > rf.lastIncludedIndex {
 			newArgs := rf.makeAppendEntriesArgs(rf.nextIndex[server] - 1, 0)
 			go rf.handleAppendEntries(server, &newArgs)
-		/*
+		
 		} else {
 			go rf.handleInstallSnapshot(server)
 		}
-		*/
+		
 	}	
 }
 
@@ -494,7 +510,6 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 
 	if reply.Term > rf.currentTerm {
 		rf.becomeFollower(reply.Term, -1)
-		return
 	}
 
 	if !rf.isLeader || !ok {
@@ -708,10 +723,20 @@ func (rf *Raft) applyStateMachine() {
 		rf.mu.Lock()
 		for rf.commitIndex > rf.lastApplied {
 			rf.lastApplied += 1
+
 			msg := ApplyMsg{}
-			msg.CommandValid = true
-			msg.Command = rf.log[rf.lastApplied].Command
-			msg.CommandIndex = rf.lastApplied
+			msg.CommandValid = rf.lastApplied > rf.lastIncludedIndex
+			msg.SnapshotValid = !msg.CommandValid
+			if msg.CommandValid {
+				msg.Command = rf.log[rf.lastApplied].Command
+				msg.CommandIndex = rf.lastApplied
+			} else {
+				msg.SnapshotTerm = rf.lastIncludedTerm
+				msg.SnapshotIndex = rf.lastIncludedIndex
+				msg.Snapshot = rf.snapshot
+
+				rf.lastApplied = rf.lastIncludedIndex
+			}			
 
 			rf.mu.Unlock()
 			rf.applyCh <- msg
