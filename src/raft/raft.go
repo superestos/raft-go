@@ -264,6 +264,8 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term int
 	Success bool
+
+	ConflictTerm int
 	ConflictIndex int
 }
 
@@ -289,19 +291,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.lastLogIndex < args.PrevLogIndex {
 		reply.Success = false
 		reply.ConflictIndex = rf.lastLogIndex + 1
+		reply.ConflictTerm = -1
 		return
 	}
 
 	if rf.logTerm(args.PrevLogIndex) != args.PrevLogTerm {
-		reply.Success = false
-
 		rf.lastLogIndex = args.PrevLogIndex - 1
 
+		reply.Success = false
+		reply.ConflictTerm = rf.logTerm(args.PrevLogIndex)
 		ind := args.PrevLogIndex - 1
-		for rf.logTerm(args.PrevLogIndex) == rf.logTerm(ind) && rf.lastIncludedIndex < ind {
+		for reply.ConflictTerm == rf.logTerm(ind) && rf.lastIncludedIndex < ind {
 			ind -= 1
 		}
-
 		reply.ConflictIndex = ind + 1
 		return
 	}
@@ -420,9 +422,9 @@ func (rf *Raft) applyStateMachine() {
 		msg.Command = rf.log[rf.lastApplied].Command
 		msg.CommandIndex = rf.lastApplied
 
-		rf.mu.Unlock()
+		//rf.mu.Unlock()
 		rf.applyCh <- msg
-		rf.mu.Lock()
+		//rf.mu.Lock()
 	}
 }
 
@@ -456,6 +458,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 
 	if reply.Term > rf.currentTerm {
 		rf.becomeFollower(reply.Term, -1)
+		return
 	}
 
 	if !rf.isLeader {
@@ -475,9 +478,17 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		}
 	} else if ok {
 		rf.nextIndex[server] = reply.ConflictIndex
-		
+		if reply.ConflictTerm != -1 {
+			for i := rf.lastLogIndex; i > rf.lastIncludedIndex; i-- {
+				if rf.logTerm(i) == reply.ConflictTerm {
+					rf.nextIndex[server] = i + 1
+					break
+				}
+			}
+		}
+
 		if rf.nextIndex[server] > rf.lastIncludedIndex {
-			newArgs := rf.makeAppendEntriesArgs(reply.ConflictIndex - 1, 0)
+			newArgs := rf.makeAppendEntriesArgs(rf.nextIndex[server] - 1, 0)
 			go rf.handleAppendEntries(server, &newArgs)
 		} else {
 			go rf.handleInstallSnapshot(server)
@@ -498,6 +509,7 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 
 	if reply.Term > rf.currentTerm {
 		rf.becomeFollower(reply.Term, -1)
+		return
 	}
 
 	if !rf.isLeader || !ok {
