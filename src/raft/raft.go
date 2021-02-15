@@ -76,7 +76,6 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	applyCh chan ApplyMsg		  // Message channel to the client
-	notifyApply chan bool
 
 	latestCall time.Time
 
@@ -456,7 +455,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if reply.Term > rf.currentTerm {
+	if ok && reply.Term > rf.currentTerm {
 		rf.becomeFollower(reply.Term, -1)
 		return
 	}
@@ -487,12 +486,14 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 			}
 		}
 
-		if rf.nextIndex[server] > rf.lastIncludedIndex {
+		//if rf.nextIndex[server] > rf.lastIncludedIndex {
 			newArgs := rf.makeAppendEntriesArgs(rf.nextIndex[server] - 1, 0)
 			go rf.handleAppendEntries(server, &newArgs)
+		/*
 		} else {
 			go rf.handleInstallSnapshot(server)
 		}
+		*/
 	}	
 }
 
@@ -597,7 +598,6 @@ func (rf *Raft) becomeFollower(term int, leaderId int) {
 	rf.nextIndex = nil
 	rf.matchIndex = nil
 
-	//rf.notifyTermChange()
 	rf.persist()
 }
 
@@ -660,15 +660,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	if rf.isLeader {
 		rf.lastLogIndex += 1
 		rf.log[rf.lastLogIndex] = LogEntries{command, rf.currentTerm}
-		
 		args := rf.makeAppendEntriesArgs(rf.lastLogIndex - 1, 1)
-
+		
 		for i := 0; i < len(rf.peers); i++ {
 			if i != rf.me && rf.matchIndex[i] == rf.lastLogIndex - 1 {
 				go rf.handleAppendEntries(i, &args)
 			}
 		}
-		
 	}
 
 	return rf.lastLogIndex, rf.currentTerm, rf.isLeader
