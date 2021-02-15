@@ -120,6 +120,8 @@ func (rf *Raft) logTerm(index int) int {
 type PersistedState struct {
 	CurrentTerm int
 	VotedFor int
+	LastIncludedTerm int
+	LastIncludedIndex int
 	LastLogIndex int
 	Log map[int]LogEntries
 }
@@ -130,14 +132,18 @@ type PersistedState struct {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
+	rf.persister.SaveRaftState(rf.getPersist())
+}
+
+func (rf *Raft) getPersist() []byte {
 	// Your code here (2C).
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	state := PersistedState{rf.currentTerm, rf.votedFor, rf.lastLogIndex, rf.log}
+	state := PersistedState{rf.currentTerm, rf.votedFor, rf.lastIncludedTerm, rf.lastIncludedIndex, rf.lastLogIndex, rf.log}
 	e.Encode(state)
 	data := w.Bytes()
-	rf.persister.SaveRaftState(data)
+	return data
 }
 
 
@@ -157,6 +163,8 @@ func (rf *Raft) readPersist(data []byte) {
 
 	rf.currentTerm = state.CurrentTerm
 	rf.votedFor = state.VotedFor
+	rf.lastIncludedTerm = state.LastIncludedTerm
+	rf.lastIncludedIndex = state.LastIncludedIndex
 	rf.lastLogIndex = state.LastLogIndex
 	rf.log = state.Log
 	rf.snapshot = rf.persister.ReadSnapshot()
@@ -181,8 +189,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.lastIncludedIndex = lastIncludedIndex
 	rf.lastLogIndex = lastIncludedIndex
 
-	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
-	rf.persist()
+	rf.persister.SaveStateAndSnapshot(rf.getPersist(), snapshot)
 	
 	return true
 }
@@ -205,8 +212,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		delete(rf.log, i)
 	}
 
-	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
-	rf.persist()
+	rf.persister.SaveStateAndSnapshot(rf.getPersist(), snapshot)
 }
 
 
