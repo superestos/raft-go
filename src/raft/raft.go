@@ -50,7 +50,6 @@ type ApplyMsg struct {
 	Command      interface{}
 	CommandIndex int
 
-	// For 2D:
 	SnapshotValid bool
 	Snapshot      []byte
 	SnapshotTerm  int
@@ -72,7 +71,6 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
-	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
@@ -84,27 +82,24 @@ type Raft struct {
 	votedFor int
 	isLeader bool
 
+	firstLogIndex int
+	lastLogIndex int
 	log map[int]LogEntries
 	
 	lastApplied int
 	commitIndex int
-
-	firstLogIndex int
-	lastLogIndex int
 
 	nextIndex []int
 	matchIndex []int
 
 	lastIncludedIndex int
 	lastIncludedTerm int
-
 	snapshot []byte
 }
 
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-	// Your code here (2A).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -112,6 +107,7 @@ func (rf *Raft) GetState() (int, bool) {
 }
 
 func (rf *Raft) logTerm(index int) int {
+	// inconsistence of log and snapshot due to crash. Cannot be leader
 	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
 		return 0
 	}
@@ -137,8 +133,6 @@ type PersistedState struct {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
-	// Your code here (2C).
-
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
 	state := PersistedState{rf.currentTerm, rf.votedFor, rf.firstLogIndex, rf.lastLogIndex, rf.log}
@@ -155,7 +149,6 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
 
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
@@ -167,7 +160,6 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.firstLogIndex = state.FirstLogIndex
 	rf.lastLogIndex = state.LastLogIndex
 	rf.log = state.Log
-	rf.snapshot = rf.persister.ReadSnapshot()
 }
 
 
@@ -176,8 +168,6 @@ func (rf *Raft) readPersist(data []byte) {
 // have more recent info since it communicate the snapshot on applyCh.
 //
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-
-	// Your code here (2D).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	
@@ -188,8 +178,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	for i := rf.firstLogIndex; i <= lastIncludedIndex; i++ {
 		delete(rf.log, i)
 	}
-	rf.lastLogIndex = lastIncludedIndex
 	rf.firstLogIndex = lastIncludedIndex + 1
+	rf.lastLogIndex = lastIncludedIndex
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 	rf.persist()
@@ -202,7 +192,6 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (2D).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -225,7 +214,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).
 	Term int
 	CandidateId int
 
@@ -238,7 +226,6 @@ type RequestVoteArgs struct {
 // field names must start with capital letters!
 //
 type RequestVoteReply struct {
-	// Your data here (2A).
 	Term int
 	VotedGranted bool
 }
@@ -247,7 +234,6 @@ type RequestVoteReply struct {
 // example RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -340,8 +326,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.commitIndex = args.LeaderCommit
 		}
 	}
-
-	//go rf.applyStateMachine()
 }
 
 type InstallSnapshotArgs struct {
@@ -380,8 +364,6 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 
 	rf.latestCall = time.Now()
-
-	
 }
 
 //
@@ -449,7 +431,7 @@ func (rf *Raft) makeAppendEntriesArgs(prevLogIndex int, numEntries int) AppendEn
 }
 
 func (rf *Raft) appendMatchedLog(server int, numEntries int) {
-	if rf.nextIndex[server] > rf.lastIncludedIndex {
+	if rf.nextIndex[server] >= rf.firstLogIndex {
 		newArgs := rf.makeAppendEntriesArgs(rf.nextIndex[server] - 1, numEntries)
 		go rf.handleAppendEntries(server, &newArgs)
 	} else {
@@ -478,7 +460,6 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 
 		rf.updateLeaderCommit()
-		//go rf.applyStateMachine()
 
 		if rf.nextIndex[server] <= rf.lastLogIndex {
 			rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
@@ -589,8 +570,8 @@ func (rf *Raft) handleRequestVote(args *RequestVoteArgs, server int, voteCount *
 	}	
 }
 
+//lock hold
 func (rf *Raft) becomeFollower(term int, leaderId int) {
-	// require lock in caller
 	rf.isLeader = false
 	rf.currentTerm = term
 	rf.votedFor = leaderId
@@ -648,7 +629,6 @@ func (rf *Raft) becomeCandidate() {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	// Your code here (2B).
 	rf.mu.Lock()
 
 	defer func() {
@@ -684,7 +664,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
-	// Your code here, if desired.
 }
 
 func (rf *Raft) killed() bool {
