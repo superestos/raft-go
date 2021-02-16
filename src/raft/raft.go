@@ -27,8 +27,6 @@ import "math/rand"
 import "bytes"
 import "6.824/labgob"
 
-//import "fmt"
-
 const minTimeout = 250
 const heartBeatTime = 150
 const waitResultTime = 50
@@ -106,6 +104,7 @@ func (rf *Raft) GetState() (int, bool) {
 	return rf.currentTerm, rf.isLeader
 }
 
+// lock hold
 func (rf *Raft) logTerm(index int) int {
 	// inconsistence of log and snapshot due to crash. Cannot be leader
 	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
@@ -249,8 +248,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		}
 	} else {
 		rf.latestCall = time.Now()
-		rf.becomeFollower(args.Term, args.CandidateId)		
 		reply.VotedGranted = true
+		rf.becomeFollower(args.Term, args.CandidateId)
 	}
 }
 
@@ -282,18 +281,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}()
 
 	reply.Term = rf.currentTerm
-
 	if rf.currentTerm > args.Term {
 		reply.Success = false
 		return
 	}
-	
 	rf.becomeFollower(args.Term, args.LeaderId)
 
 	if rf.lastLogIndex < args.PrevLogIndex {
 		reply.Success = false
-		reply.ConflictIndex = rf.lastLogIndex + 1
 		reply.ConflictTerm = -1
+		reply.ConflictIndex = rf.lastLogIndex + 1
 		return
 	}
 
@@ -344,26 +341,22 @@ type InstallSnapshotReply struct {
 
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
-
-	defer func() {
-		rf.mu.Unlock()
-		rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
-	}()
 	
 	reply.Term = rf.currentTerm
-
 	if args.Term < rf.currentTerm {
+		rf.mu.Unlock()
 		return
 	}
-
 	rf.becomeFollower(args.Term, args.LeaderId)
 
-	update := args.LastIncludedTerm > rf.lastIncludedTerm || (args.LastIncludedTerm == rf.lastIncludedTerm && args.LastIncludedIndex > rf.lastIncludedIndex)
-	if !update {
-		return
-	}
+	rf.mu.Unlock()
 
-	rf.latestCall = time.Now()
+	updated := rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
+	if updated {
+		rf.mu.Lock()
+		rf.latestCall = time.Now()
+		rf.mu.Unlock()
+	}
 }
 
 //
@@ -500,6 +493,8 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 
 	rf.nextIndex[server] = args.LastIncludedIndex + 1
 	rf.matchIndex[server] = args.LastIncludedIndex
+
+	rf.updateLeaderCommit()
 
 	if rf.nextIndex[server] <= rf.lastLogIndex {
 		rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
