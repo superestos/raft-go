@@ -88,6 +88,8 @@ type Raft struct {
 	
 	lastApplied int
 	commitIndex int
+
+	firstLogIndex int
 	lastLogIndex int
 
 	nextIndex []int
@@ -110,7 +112,11 @@ func (rf *Raft) GetState() (int, bool) {
 }
 
 func (rf *Raft) logTerm(index int) int {
-	if index > rf.lastIncludedIndex {
+	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
+		return 0
+	}
+	
+	if index >= rf.firstLogIndex {
 		return rf.log[index].Term
 	} else {
 		return rf.lastIncludedTerm
@@ -120,8 +126,7 @@ func (rf *Raft) logTerm(index int) int {
 type PersistedState struct {
 	CurrentTerm int
 	VotedFor int
-	//LastIncludedTerm int
-	//LastIncludedIndex int
+	FirstLogIndex int
 	LastLogIndex int
 	Log map[int]LogEntries
 }
@@ -136,7 +141,7 @@ func (rf *Raft) persist() {
 
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	state := PersistedState{rf.currentTerm, rf.votedFor, /*rf.lastIncludedTerm, rf.lastIncludedIndex,*/ rf.lastLogIndex, rf.log}
+	state := PersistedState{rf.currentTerm, rf.votedFor, rf.firstLogIndex, rf.lastLogIndex, rf.log}
 	e.Encode(state)
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
@@ -159,8 +164,7 @@ func (rf *Raft) readPersist(data []byte) {
 
 	rf.currentTerm = state.CurrentTerm
 	rf.votedFor = state.VotedFor
-	//rf.lastIncludedTerm = state.LastIncludedTerm
-	//rf.lastIncludedIndex = state.LastIncludedIndex
+	rf.firstLogIndex = state.FirstLogIndex
 	rf.lastLogIndex = state.LastLogIndex
 	rf.log = state.Log
 	rf.snapshot = rf.persister.ReadSnapshot()
@@ -179,11 +183,13 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
-	for i := rf.lastIncludedIndex + 1; i <= lastIncludedIndex; i++ {
+	rf.lastIncludedIndex = lastIncludedIndex
+
+	for i := rf.firstLogIndex; i <= lastIncludedIndex; i++ {
 		delete(rf.log, i)
 	}
-	rf.lastIncludedIndex = lastIncludedIndex
 	rf.lastLogIndex = lastIncludedIndex
+	rf.firstLogIndex = lastIncludedIndex + 1
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 	rf.persist()
@@ -200,14 +206,14 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	lastIncludedIndex := rf.lastIncludedIndex
-
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = rf.logTerm(index)
 	rf.lastIncludedIndex = index
-	for i := lastIncludedIndex + 1; i <= index; i++ {
+
+	for i := rf.firstLogIndex; i <= index; i++ {
 		delete(rf.log, i)
 	}
+	rf.firstLogIndex = index + 1
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 	rf.persist()
@@ -311,7 +317,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		reply.ConflictTerm = rf.logTerm(args.PrevLogIndex)
 		ind := args.PrevLogIndex - 1
-		for reply.ConflictTerm == rf.logTerm(ind) && rf.lastIncludedIndex < ind {
+		for reply.ConflictTerm == rf.logTerm(ind) && rf.firstLogIndex <= ind {
 			ind -= 1
 		}
 		reply.ConflictIndex = ind + 1
@@ -480,7 +486,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 	} else if ok {
 		rf.nextIndex[server] = reply.ConflictIndex
 		if reply.ConflictTerm != -1 {
-			for i := rf.lastLogIndex; i > rf.lastIncludedIndex; i-- {
+			for i := rf.lastLogIndex; i >= rf.firstLogIndex; i-- {
 				if rf.logTerm(i) == reply.ConflictTerm {
 					rf.nextIndex[server] = i + 1
 					break
@@ -719,8 +725,8 @@ func (rf *Raft) applyStateMachine() {
 			rf.lastApplied += 1
 
 			msg := ApplyMsg{}
-			msg.CommandValid = rf.lastApplied > rf.lastIncludedIndex
-			msg.SnapshotValid = !msg.CommandValid
+			msg.CommandValid = rf.lastApplied >= rf.firstLogIndex
+			msg.SnapshotValid = rf.lastApplied <= rf.lastIncludedIndex
 			if msg.CommandValid {
 				msg.Command = rf.log[rf.lastApplied].Command
 				msg.CommandIndex = rf.lastApplied
@@ -730,7 +736,12 @@ func (rf *Raft) applyStateMachine() {
 				msg.Snapshot = rf.snapshot
 
 				rf.lastApplied = rf.lastIncludedIndex
-			}			
+			}	
+			
+			if !msg.CommandValid && !msg.SnapshotValid {
+				rf.lastApplied -= 1
+				break
+			}
 
 			rf.mu.Unlock()
 			rf.applyCh <- msg
@@ -772,6 +783,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	rf.commitIndex = 0
 	rf.lastApplied = 0
+
+	rf.firstLogIndex = 1
 	rf.lastLogIndex = 0
 
 	rf.lastIncludedIndex = 0
