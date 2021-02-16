@@ -17,15 +17,17 @@ package raft
 //   in the same server.
 //
 
-import "sync"
-import "sync/atomic"
-import "6.824/labrpc"
+import (
+	"bytes"
+	"sync"
+	"sync/atomic"
 
-import "time"
-import "math/rand"
+	"time"
+	"math/rand"
 
-import "bytes"
-import "6.824/labgob"
+	"6.824/labgob"
+	"6.824/labrpc"
+)
 
 const minTimeout = 250
 const heartBeatTime = 150
