@@ -576,6 +576,17 @@ func (rf *Raft) becomeFollower(term int, leaderId int) {
 	rf.persist()
 }
 
+func (rf *Raft) becomeLeader() {
+	rf.isLeader = true
+	rf.nextIndex = make([]int, len(rf.peers))
+	rf.matchIndex = make([]int, len(rf.peers))
+	for i := 0; i < len(rf.peers); i++ {
+		rf.nextIndex[i] = rf.lastLogIndex + 1
+	}
+
+	go rf.sendHeartBeat()
+}
+
 // receive request vote reply
 func (rf *Raft) becomeCandidate() {
 	rf.mu.Lock()
@@ -597,14 +608,7 @@ func (rf *Raft) becomeCandidate() {
 
 	rf.mu.Lock()
 	if voteCount > len(rf.peers) / 2 && args.Term == rf.currentTerm && rf.votedFor == rf.me {
-		rf.isLeader = true
-		rf.nextIndex = make([]int, len(rf.peers))
-		rf.matchIndex = make([]int, len(rf.peers))
-		for i := 0; i < len(rf.peers); i++ {
-			rf.nextIndex[i] = rf.lastLogIndex + 1
-		}
-
-		go rf.sendHeartBeat()
+		rf.becomeLeader()
 	}
 	rf.mu.Unlock()
 }
