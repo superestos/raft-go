@@ -594,6 +594,8 @@ func (rf *Raft) becomeLeader() {
 func (rf *Raft) becomeCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm += 1
+	rf.persist()
+
 	voteCount := 1
 	rf.votedFor = rf.me
 
@@ -604,7 +606,6 @@ func (rf *Raft) becomeCandidate() {
 		}
 	}
 
-	rf.persist()
 	rf.mu.Unlock()
 
 	time.Sleep(waitResultTime * time.Millisecond)
@@ -637,8 +638,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		if rf.isLeader {
 			rf.lastLogIndex += 1
 			rf.log[rf.lastLogIndex] = LogEntries{command, rf.currentTerm}
+			rf.persist()
+
 			args := rf.makeAppendEntriesArgs(rf.lastLogIndex - 1, 1)
-			
 			for i := 0; i < len(rf.peers); i++ {
 				if i != rf.me && rf.matchIndex[i] == rf.lastLogIndex - 1 {
 					go rf.handleAppendEntries(i, &args)
@@ -646,7 +648,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 			}
 		}
 
-		rf.persist()
 		rf.mu.Unlock()
 	}()
 
