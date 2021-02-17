@@ -7,7 +7,12 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	//"fmt"
 )
+
+const commitTimeout = 800
 
 const Debug = false
 
@@ -23,6 +28,11 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Key   string
+	Value string
+	Op    string
+	ClerkId int64
+	CommandId int32
 }
 
 type KVServer struct {
@@ -35,15 +45,76 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	db map[string]string
+	notifyCh map[int](chan int)
+	lastCommand map[int64]int32
 }
 
+func (kv *KVServer) start(op Op) bool {
+	kv.mu.Lock()
+	index, term, ok := kv.rf.Start(op)
+
+	if ok {
+		ch := make(chan int, 1)
+		kv.notifyCh[index] = ch
+		kv.mu.Unlock()
+
+		defer func() {
+			kv.mu.Lock()
+			delete(kv.notifyCh, index)
+			kv.mu.Unlock()
+		}()
+
+		select {
+		case commandTerm := <-ch:
+			return commandTerm == term
+		case <-time.After(commitTimeout * time.Millisecond):
+		}
+	} else {
+		kv.mu.Unlock()
+	}
+
+	return false
+}
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	op := Op{args.Key, "", "Get", args.ClerkId, args.CommandId}
+
+	if kv.start(op) {
+		kv.mu.Lock()
+		value, existed := kv.db[args.Key]
+		kv.mu.Unlock()
+
+		if existed {
+			reply.Err = OK
+			reply.Value = value
+		} else {
+			reply.Err = ErrNoKey
+		}
+	} else {
+		reply.Err = ErrWrongLeader
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	op := Op{args.Key, args.Value, args.Op, args.ClerkId, args.CommandId}
+
+	if kv.start(op) {
+		reply.Err = OK
+	} else {
+		reply.Err = ErrWrongLeader
+	}
+}
+
+func (kv *KVServer) isDuplicate(clerkId int64, commandId int32) bool {
+	lastCommand, existed := kv.lastCommand[clerkId]
+	if !existed {
+		kv.lastCommand[clerkId] = 0
+		lastCommand = 0
+	}
+	return lastCommand >= commandId
 }
 
 //
@@ -97,5 +168,36 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 
+	kv.db = make(map[string]string)
+	kv.notifyCh = make(map[int](chan int))
+	kv.lastCommand = make(map[int64]int32)
+
+	go kv.applyStateMachine()
+
 	return kv
+}
+
+func (kv *KVServer) applyStateMachine() {
+	for msg := range kv.applyCh {
+		if msg.CommandValid {
+			op := msg.Command.(Op)
+
+			kv.mu.Lock()
+
+			if !kv.isDuplicate(op.ClerkId, op.CommandId) {
+				if op.Op == "Put" {
+					kv.db[op.Key] = op.Value
+				} else if op.Op == "Append" {
+					kv.db[op.Key] += op.Value
+				}
+				kv.lastCommand[op.ClerkId] = op.CommandId
+			}
+			//fmt.Println("server", kv.me, "client", op.ClerkId, "command", op.CommandId)
+
+			if kv.notifyCh[msg.CommandIndex] != nil {
+				kv.notifyCh[msg.CommandIndex] <- msg.CommandTerm
+			}
+			kv.mu.Unlock()
+		}
+	}
 }
