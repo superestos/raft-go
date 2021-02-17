@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	//"fmt"
 )
 
 const commitTimeout = 800
@@ -48,15 +50,15 @@ type KVServer struct {
 	lastCommand map[int64]int32
 }
 
-func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
-	op := Op{args.Key, "", "Get", args.ClerkId, args.CommandId}
+func (kv *KVServer) start(op Op) bool {
 	kv.mu.Lock()
 	index, term, ok := kv.rf.Start(op)
 
 	if ok {
-		kv.notifyCh[index] = make(chan int, 1)
+		ch := make(chan int, 1)
+		kv.notifyCh[index] = ch
 		kv.mu.Unlock()
+
 		defer func() {
 			kv.mu.Lock()
 			delete(kv.notifyCh, index)
@@ -64,71 +66,55 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		}()
 
 		select {
-		case commandTerm := <-kv.notifyCh[index]:
-			if commandTerm == term {
-				kv.mu.Lock()
-				value, existed := kv.db[args.Key]
-				kv.mu.Unlock()
-
-				if existed {
-					reply.Err = OK
-					reply.Value = value
-				} else {
-					reply.Err = ErrNoKey
-				}
-				return
-			}
-
+		case commandTerm := <-ch:
+			return commandTerm == term
 		case <-time.After(commitTimeout * time.Millisecond):
 		}
 	} else {
 		kv.mu.Unlock()
 	}
 
-	reply.Err = ErrWrongLeader
+	return false
+}
+
+func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
+	// Your code here.
+	op := Op{args.Key, "", "Get", args.ClerkId, args.CommandId}
+
+	if kv.start(op) {
+		kv.mu.Lock()
+		value, existed := kv.db[args.Key]
+		kv.mu.Unlock()
+
+		if existed {
+			reply.Err = OK
+			reply.Value = value
+		} else {
+			reply.Err = ErrNoKey
+		}
+	} else {
+		reply.Err = ErrWrongLeader
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	kv.mu.Lock()
-	lastCommand, existed := kv.lastCommand[args.ClerkId]
-	if !existed {
-		kv.lastCommand[args.ClerkId] = 0
-	}
-	kv.mu.Unlock()
-
-	if lastCommand > args.CommandId {
-		reply.Err = OK
-		return
-	}
-
 	op := Op{args.Key, args.Value, args.Op, args.ClerkId, args.CommandId}
-	kv.mu.Lock()
-	index, term, ok := kv.rf.Start(op)
 
-	if ok {
-		kv.notifyCh[index] = make(chan int, 1)
-		kv.mu.Unlock()
-		defer func() {
-			kv.mu.Lock()
-			delete(kv.notifyCh, index)
-			kv.mu.Unlock()
-		}()
-
-		select {
-		case commandTerm := <-kv.notifyCh[index]:
-			if commandTerm == term {
-				reply.Err = OK
-				return
-			}
-			
-		case <-time.After(commitTimeout * time.Millisecond):
-		}
+	if kv.start(op) {
+		reply.Err = OK
 	} else {
-		kv.mu.Unlock()
+		reply.Err = ErrWrongLeader
 	}
-	
-	reply.Err = ErrWrongLeader
+}
+
+func (kv *KVServer) isDuplicate(clerkId int64, commandId int32) bool {
+	lastCommand, existed := kv.lastCommand[clerkId]
+	if !existed {
+		kv.lastCommand[clerkId] = 0
+		lastCommand = 0
+	}
+	return lastCommand >= commandId
 }
 
 //
@@ -192,19 +178,21 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 }
 
 func (kv *KVServer) applyStateMachine() {
-	for !kv.killed() {
-		msg := <-kv.applyCh
-
+	for msg := range kv.applyCh {
 		if msg.CommandValid {
 			op := msg.Command.(Op)
 
 			kv.mu.Lock()
-			if op.Op == "Put" {
-				kv.db[op.Key] = op.Value
-			} else if op.Op == "Append" {
-				kv.db[op.Key] += op.Value
+
+			if !kv.isDuplicate(op.ClerkId, op.CommandId) {
+				if op.Op == "Put" {
+					kv.db[op.Key] = op.Value
+				} else if op.Op == "Append" {
+					kv.db[op.Key] += op.Value
+				}
+				kv.lastCommand[op.ClerkId] = op.CommandId
 			}
-			kv.lastCommand[op.ClerkId] = op.CommandId
+			//fmt.Println("server", kv.me, "client", op.ClerkId, "command", op.CommandId)
 
 			if kv.notifyCh[msg.CommandIndex] != nil {
 				kv.notifyCh[msg.CommandIndex] <- msg.CommandTerm
