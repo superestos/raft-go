@@ -121,6 +121,18 @@ func (rf *Raft) logTerm(index int) int {
 	}
 }
 
+//lock hold
+func (rf *Raft) trimLog(first int, last int) {
+	for i := rf.firstLogIndex; i < first; i++ {
+		delete(rf.log, i)
+	}
+	for i := last + 1; i < rf.lastLogIndex; i++ {
+		delete(rf.log, i)
+	}
+	rf.firstLogIndex = first
+	rf.lastLogIndex = last
+}
+
 type PersistedState struct {
 	CurrentTerm int
 	VotedFor int
@@ -177,11 +189,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.lastIncludedTerm = lastIncludedTerm
 	rf.lastIncludedIndex = lastIncludedIndex
 
-	for i := rf.firstLogIndex; i <= lastIncludedIndex; i++ {
-		delete(rf.log, i)
-	}
-	rf.firstLogIndex = lastIncludedIndex + 1
-	rf.lastLogIndex = lastIncludedIndex
+	rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 	rf.persist()
@@ -201,10 +209,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.lastIncludedTerm = rf.logTerm(index)
 	rf.lastIncludedIndex = index
 
-	for i := rf.firstLogIndex; i <= index; i++ {
-		delete(rf.log, i)
-	}
-	rf.firstLogIndex = index + 1
+	rf.trimLog(index + 1, rf.lastLogIndex)
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 	rf.persist()
@@ -298,8 +303,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	if rf.logTerm(args.PrevLogIndex) != args.PrevLogTerm {
-		rf.lastLogIndex = args.PrevLogIndex - 1
-
 		reply.Success = false
 		reply.ConflictTerm = rf.logTerm(args.PrevLogIndex)
 		ind := args.PrevLogIndex - 1
@@ -307,25 +310,28 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			ind -= 1
 		}
 		reply.ConflictIndex = ind + 1
+
+		rf.trimLog(rf.firstLogIndex, args.PrevLogIndex - 1)
 		return
 	}
 
-	rf.latestCall = time.Now()
-	rf.lastLogIndex = args.PrevLogIndex
 	reply.Success = true
+	rf.latestCall = time.Now()
 
+	rf.updateFollowerCommit(args.LeaderCommit, args.PrevLogIndex + len(args.Entries))
+
+	if len(args.Entries) == 0 || (args.PrevLogIndex + len(args.Entries) <= rf.lastLogIndex && rf.logTerm(args.PrevLogIndex + len(args.Entries)) == args.Entries[len(args.Entries) - 1].Term) {
+		return
+	}
+
+	rf.lastLogIndex = args.PrevLogIndex
 	for i := 0; i < len(args.Entries); i++ {
 		rf.lastLogIndex += 1
 		rf.log[rf.lastLogIndex] = args.Entries[i]
 	}
+	rf.trimLog(rf.firstLogIndex, rf.lastLogIndex)
 
-	if args.LeaderCommit > rf.commitIndex {
-		if args.LeaderCommit > rf.lastLogIndex {
-			rf.commitIndex = rf.lastLogIndex
-		} else {
-			rf.commitIndex = args.LeaderCommit
-		}
-	}
+	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
 }
 
 type InstallSnapshotArgs struct {
@@ -504,6 +510,7 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 	}
 }
 
+//lock hold
 func (rf *Raft) updateLeaderCommit() {
 	for n := rf.commitIndex + 1; n <= rf.lastLogIndex; n++ {
 		if rf.logTerm(n) != rf.currentTerm {
@@ -521,6 +528,17 @@ func (rf *Raft) updateLeaderCommit() {
 			rf.commitIndex = n
 		} else {
 			break
+		}
+	}
+}
+
+//lock hold
+func (rf *Raft) updateFollowerCommit(leaderCommit int, lastLogIndex int) {
+	if leaderCommit > rf.commitIndex {
+		if leaderCommit > lastLogIndex {
+			rf.commitIndex = lastLogIndex
+		} else {
+			rf.commitIndex = leaderCommit
 		}
 	}
 }
