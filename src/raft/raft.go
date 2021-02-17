@@ -48,6 +48,7 @@ const applyInterval = 5
 type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
+	CommandTerm  int
 	CommandIndex int
 
 	SnapshotValid bool
@@ -633,23 +634,23 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 
 	defer func() {
+		if rf.isLeader {
+			rf.lastLogIndex += 1
+			rf.log[rf.lastLogIndex] = LogEntries{command, rf.currentTerm}
+			args := rf.makeAppendEntriesArgs(rf.lastLogIndex - 1, 1)
+			
+			for i := 0; i < len(rf.peers); i++ {
+				if i != rf.me && rf.matchIndex[i] == rf.lastLogIndex - 1 {
+					go rf.handleAppendEntries(i, &args)
+				}
+			}
+		}
+
 		rf.persist()
 		rf.mu.Unlock()
 	}()
 
-	if rf.isLeader {
-		rf.lastLogIndex += 1
-		rf.log[rf.lastLogIndex] = LogEntries{command, rf.currentTerm}
-		args := rf.makeAppendEntriesArgs(rf.lastLogIndex - 1, 1)
-		
-		for i := 0; i < len(rf.peers); i++ {
-			if i != rf.me && rf.matchIndex[i] == rf.lastLogIndex - 1 {
-				go rf.handleAppendEntries(i, &args)
-			}
-		}
-	}
-
-	return rf.lastLogIndex, rf.currentTerm, rf.isLeader
+	return rf.lastLogIndex + 1, rf.currentTerm, rf.isLeader
 }
 
 //
@@ -708,8 +709,9 @@ func (rf *Raft) applyStateMachine() {
 			msg.CommandValid = rf.lastApplied >= rf.firstLogIndex
 			msg.SnapshotValid = rf.lastApplied <= rf.lastIncludedIndex
 			if msg.CommandValid {
-				msg.Command = rf.log[rf.lastApplied].Command
+				msg.CommandTerm = rf.currentTerm
 				msg.CommandIndex = rf.lastApplied
+				msg.Command = rf.log[rf.lastApplied].Command
 			} else {
 				msg.SnapshotTerm = rf.lastIncludedTerm
 				msg.SnapshotIndex = rf.lastIncludedIndex

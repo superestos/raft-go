@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const commitTimeout = 800
+
 const Debug = false
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
@@ -27,6 +29,8 @@ type Op struct {
 	Key   string
 	Value string
 	Op    string
+	ClerkId int64
+	CommandId int32
 }
 
 type KVServer struct {
@@ -44,57 +48,86 @@ type KVServer struct {
 	lastCommand map[int64]int32
 }
 
-
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	op := Op{args.Key, "", "Get"}
-	index, _, ok := kv.rf.Start(op)
+	op := Op{args.Key, "", "Get", args.ClerkId, args.CommandId}
+	kv.mu.Lock()
+	index, term, ok := kv.rf.Start(op)
 
 	if ok {
-		kv.mu.Lock()
 		kv.notifyCh[index] = make(chan int, 1)
 		kv.mu.Unlock()
-		defer delete(kv.notifyCh, index)
+		defer func() {
+			kv.mu.Lock()
+			delete(kv.notifyCh, index)
+			kv.mu.Unlock()
+		}()
 
 		select {
-		case <-kv.notifyCh[index]:
-			kv.mu.Lock()
-			value, existed := kv.db[args.Key]
-			kv.mu.Unlock()
+		case commandTerm := <-kv.notifyCh[index]:
+			if commandTerm == term {
+				kv.mu.Lock()
+				value, existed := kv.db[args.Key]
+				kv.mu.Unlock()
 
-			if existed {
-				reply.Err = OK
-				reply.Value = value
-			} else {
-				reply.Err = ErrNoKey
+				if existed {
+					reply.Err = OK
+					reply.Value = value
+				} else {
+					reply.Err = ErrNoKey
+				}
+				return
 			}
-			return
 
-		case <-time.After(1000 * time.Millisecond):
+		case <-time.After(commitTimeout * time.Millisecond):
 		}
+	} else {
+		kv.mu.Unlock()
 	}
+
 	reply.Err = ErrWrongLeader
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	op := Op{args.Key, args.Value, args.Op}
-	index, _, ok := kv.rf.Start(op)
+	kv.mu.Lock()
+	lastCommand, existed := kv.lastCommand[args.ClerkId]
+	if !existed {
+		kv.lastCommand[args.ClerkId] = 0
+	}
+	kv.mu.Unlock()
+
+	if lastCommand > args.CommandId {
+		reply.Err = OK
+		return
+	}
+
+	op := Op{args.Key, args.Value, args.Op, args.ClerkId, args.CommandId}
+	kv.mu.Lock()
+	index, term, ok := kv.rf.Start(op)
 
 	if ok {
-		kv.mu.Lock()
 		kv.notifyCh[index] = make(chan int, 1)
 		kv.mu.Unlock()
-		defer delete(kv.notifyCh, index)
+		defer func() {
+			kv.mu.Lock()
+			delete(kv.notifyCh, index)
+			kv.mu.Unlock()
+		}()
 
 		select {
-		case <-kv.notifyCh[index]:
-			reply.Err = OK
-			return
+		case commandTerm := <-kv.notifyCh[index]:
+			if commandTerm == term {
+				reply.Err = OK
+				return
+			}
 			
-		case <-time.After(1000 * time.Millisecond):
+		case <-time.After(commitTimeout * time.Millisecond):
 		}
+	} else {
+		kv.mu.Unlock()
 	}
+	
 	reply.Err = ErrWrongLeader
 }
 
@@ -164,13 +197,19 @@ func (kv *KVServer) applyStateMachine() {
 
 		if msg.CommandValid {
 			op := msg.Command.(Op)
+
+			kv.mu.Lock()
 			if op.Op == "Put" {
 				kv.db[op.Key] = op.Value
 			} else if op.Op == "Append" {
 				kv.db[op.Key] += op.Value
 			}
+			kv.lastCommand[op.ClerkId] = op.CommandId
 
-			kv.notifyCh[msg.CommandIndex] <- 0
+			if kv.notifyCh[msg.CommandIndex] != nil {
+				kv.notifyCh[msg.CommandIndex] <- msg.CommandTerm
+			}
+			kv.mu.Unlock()
 		}
 	}
 }
