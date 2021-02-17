@@ -7,6 +7,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const Debug = false
@@ -23,6 +24,9 @@ type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Key   string
+	Value string
+	Op    string
 }
 
 type KVServer struct {
@@ -35,15 +39,63 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	db map[string]string
+	notifyCh map[int](chan int)
+	lastCommand map[int64]int32
 }
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	op := Op{args.Key, "", "Get"}
+	index, _, ok := kv.rf.Start(op)
+
+	if ok {
+		kv.mu.Lock()
+		kv.notifyCh[index] = make(chan int, 1)
+		kv.mu.Unlock()
+		defer delete(kv.notifyCh, index)
+
+		select {
+		case <-kv.notifyCh[index]:
+			kv.mu.Lock()
+			value, existed := kv.db[args.Key]
+			kv.mu.Unlock()
+
+			if existed {
+				reply.Err = OK
+				reply.Value = value
+			} else {
+				reply.Err = ErrNoKey
+			}
+			return
+
+		case <-time.After(1000 * time.Millisecond):
+		}
+	}
+	reply.Err = ErrWrongLeader
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	op := Op{args.Key, args.Value, args.Op}
+	index, _, ok := kv.rf.Start(op)
+
+	if ok {
+		kv.mu.Lock()
+		kv.notifyCh[index] = make(chan int, 1)
+		kv.mu.Unlock()
+		defer delete(kv.notifyCh, index)
+
+		select {
+		case <-kv.notifyCh[index]:
+			reply.Err = OK
+			return
+			
+		case <-time.After(1000 * time.Millisecond):
+		}
+	}
+	reply.Err = ErrWrongLeader
 }
 
 //
@@ -97,5 +149,28 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// You may need initialization code here.
 
+	kv.db = make(map[string]string)
+	kv.notifyCh = make(map[int](chan int))
+	kv.lastCommand = make(map[int64]int32)
+
+	go kv.applyStateMachine()
+
 	return kv
+}
+
+func (kv *KVServer) applyStateMachine() {
+	for !kv.killed() {
+		msg := <-kv.applyCh
+
+		if msg.CommandValid {
+			op := msg.Command.(Op)
+			if op.Op == "Put" {
+				kv.db[op.Key] = op.Value
+			} else if op.Op == "Append" {
+				kv.db[op.Key] += op.Value
+			}
+
+			kv.notifyCh[msg.CommandIndex] <- 0
+		}
+	}
 }

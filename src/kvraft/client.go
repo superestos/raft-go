@@ -3,11 +3,16 @@ package kvraft
 import "6.824/labrpc"
 import "crypto/rand"
 import "math/big"
-
+import "sync/atomic"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+
+	leaderId int
+	me int64
+
+	commandCount int32
 }
 
 func nrand() int64 {
@@ -21,6 +26,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.leaderId = 0
+	ck.me = nrand()
+	ck.commandCount = 0
 	return ck
 }
 
@@ -39,7 +47,21 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Get(key string) string {
 
 	// You will have to modify this function.
-	return ""
+	commandId := atomic.AddInt32(&ck.commandCount, 1)
+	args := GetArgs{key, ck.me, commandId}
+
+	for {
+		reply := GetReply{}
+		ck.servers[ck.leaderId].Call("KVServer.Get", &args, &reply)
+
+		if reply.Err == OK {
+			return reply.Value
+		} else if reply.Err == ErrNoKey {
+			return ""
+		}
+
+		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+	}
 }
 
 //
@@ -53,7 +75,21 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
+
 	// You will have to modify this function.
+	commandId := atomic.AddInt32(&ck.commandCount, 1)
+	args := PutAppendArgs{key, value, op, ck.me, commandId}
+
+	for {
+		reply := PutAppendReply{}
+		ck.servers[ck.leaderId].Call("KVServer.PutAppend", &args, &reply)
+
+		if reply.Err == OK {
+			return
+		}
+
+		ck.leaderId = (ck.leaderId + 1) % len(ck.servers)
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
