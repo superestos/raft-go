@@ -282,11 +282,7 @@ type AppendEntriesReply struct {
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
-
-	defer func() {
-		rf.persist()
-		rf.mu.Unlock()
-	}()
+	defer rf.mu.Unlock()
 
 	reply.Term = rf.currentTerm
 	if rf.currentTerm > args.Term {
@@ -312,6 +308,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.ConflictIndex = ind + 1
 
 		rf.trimLog(rf.firstLogIndex, args.PrevLogIndex - 1)
+		rf.persist()
 		return
 	}
 
@@ -332,6 +329,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.trimLog(rf.firstLogIndex, rf.lastLogIndex)
 
 	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
+	rf.persist()
 }
 
 type InstallSnapshotArgs struct {
