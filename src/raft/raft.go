@@ -184,12 +184,16 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	if lastIncludedIndex <= rf.lastLogIndex && rf.logTerm(lastIncludedIndex) == lastIncludedTerm {
+		rf.trimLog(lastIncludedIndex + 1, rf.lastLogIndex)
+	} else {
+		rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
+	}
 	
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
 	rf.lastIncludedIndex = lastIncludedIndex
-
-	rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
 	rf.persist()
@@ -500,10 +504,12 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 		return
 	}
 
-	rf.nextIndex[server] = args.LastIncludedIndex + 1
-	rf.matchIndex[server] = args.LastIncludedIndex
+	if rf.matchIndex[server] < args.LastIncludedIndex {
+		rf.nextIndex[server] = args.LastIncludedIndex + 1
+		rf.matchIndex[server] = args.LastIncludedIndex
 
-	rf.updateLeaderCommit()
+		rf.updateLeaderCommit()
+	}
 
 	if rf.nextIndex[server] <= rf.lastLogIndex {
 		rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
