@@ -456,10 +456,12 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 	}
 
 	if reply.Success {
-		rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
-		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+		if rf.matchIndex[server] <= args.PrevLogIndex + len(args.Entries) {
+			rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
+			rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
 
-		rf.updateLeaderCommit()
+			rf.updateLeaderCommit()
+		}
 
 		if rf.nextIndex[server] <= rf.lastLogIndex {
 			rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
