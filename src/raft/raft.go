@@ -734,7 +734,7 @@ func (rf *Raft) applyStateMachine() {
 			msg.CommandValid = rf.lastApplied >= rf.firstLogIndex
 			msg.SnapshotValid = rf.lastApplied <= rf.lastIncludedIndex
 			if msg.CommandValid {
-				msg.CommandTerm = rf.currentTerm
+				msg.CommandTerm = rf.log[rf.lastApplied].Term
 				msg.CommandIndex = rf.lastApplied
 				msg.Command = rf.log[rf.lastApplied].Command
 			} else {
