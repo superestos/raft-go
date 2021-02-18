@@ -8,11 +8,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
+	"bytes"
 	//"fmt"
 )
 
 const commitTimeout = 500
+const snapshotInterval = 50
 
 const Debug = false
 
@@ -45,9 +46,18 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	persister *raft.Persister
+
 	db map[string]string
 	notifyCh map[int](chan int)
 	lastCommand map[int64]int32
+
+	index int
+}
+
+type SnapshotInfo struct {
+	DB map[string]string
+	LastCommand map[int64]int32
 }
 
 func (kv *KVServer) start(op Op) bool {
@@ -167,12 +177,17 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
+	kv.persister = persister
 
 	kv.db = make(map[string]string)
 	kv.notifyCh = make(map[int](chan int))
 	kv.lastCommand = make(map[int64]int32)
 
 	go kv.applyStateMachine()
+
+	if maxraftstate > 0 {
+		go kv.createSnapshot()
+	}
 
 	return kv
 }
@@ -183,7 +198,6 @@ func (kv *KVServer) applyStateMachine() {
 			op := msg.Command.(Op)
 
 			kv.mu.Lock()
-
 			if !kv.isDuplicate(op.ClerkId, op.CommandId) {
 				if op.Op == "Put" {
 					kv.db[op.Key] = op.Value
@@ -192,12 +206,45 @@ func (kv *KVServer) applyStateMachine() {
 				}
 				kv.lastCommand[op.ClerkId] = op.CommandId
 			}
-			//fmt.Println("server", kv.me, "client", op.ClerkId, "command", op.CommandId)
-
+			
+			kv.index = msg.CommandIndex
 			if kv.notifyCh[msg.CommandIndex] != nil {
 				kv.notifyCh[msg.CommandIndex] <- msg.CommandTerm
 			}
 			kv.mu.Unlock()
+
+		} else if msg.SnapshotValid {
+			snapshot := msg.Snapshot
+
+			kv.mu.Lock()
+
+			r := bytes.NewBuffer(snapshot)
+			d := labgob.NewDecoder(r)
+			s := SnapshotInfo{}
+			d.Decode(&s)
+
+			kv.db = s.DB
+			kv.lastCommand = s.LastCommand
+			kv.index = msg.SnapshotIndex
+
+			kv.mu.Unlock()
 		}
+	}
+}
+
+func (kv *KVServer) createSnapshot() {
+	for !kv.killed() {
+		kv.mu.Lock()
+		if kv.persister.RaftStateSize() > kv.maxraftstate {
+			w := new(bytes.Buffer)
+			e := labgob.NewEncoder(w)
+			s := SnapshotInfo{kv.db, kv.lastCommand}
+			e.Encode(s)
+			snapshot := w.Bytes()
+			kv.rf.Snapshot(kv.index, snapshot)
+		}
+		kv.mu.Unlock()
+
+		time.Sleep(snapshotInterval * time.Millisecond)
 	}
 }
