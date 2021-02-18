@@ -12,7 +12,7 @@ import (
 	//"fmt"
 )
 
-const commitTimeout = 800
+const commitTimeout = 500
 
 const Debug = false
 

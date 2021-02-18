@@ -32,7 +32,7 @@ import (
 const minTimeout = 200
 const heartBeatTime = 100
 const waitResultTime = 30
-const applyInterval = 5
+const applyInterval = 2
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -294,6 +294,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 	rf.becomeFollower(args.Term, args.LeaderId)
+	rf.latestCall = time.Now()
 
 	if rf.lastLogIndex < args.PrevLogIndex {
 		reply.Success = false
@@ -317,7 +318,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	reply.Success = true
-	rf.latestCall = time.Now()
 
 	rf.updateFollowerCommit(args.LeaderCommit, args.PrevLogIndex + len(args.Entries))
 
@@ -359,15 +359,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		return
 	}
 	rf.becomeFollower(args.Term, args.LeaderId)
+	rf.latestCall = time.Now()
 
 	rf.mu.Unlock()
 
-	updated := rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
-	if updated {
-		rf.mu.Lock()
-		rf.latestCall = time.Now()
-		rf.mu.Unlock()
-	}
+	rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
 }
 
 //
