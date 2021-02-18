@@ -29,9 +29,9 @@ import (
 	"6.824/labrpc"
 )
 
-const minTimeout = 250
-const heartBeatTime = 150
-const waitResultTime = 50
+const minTimeout = 200
+const heartBeatTime = 100
+const waitResultTime = 30
 const applyInterval = 5
 
 //
