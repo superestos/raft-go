@@ -185,10 +185,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	go kv.applyStateMachine()
 
-	if maxraftstate > 0 {
-		go kv.createSnapshot()
-	}
-
 	return kv
 }
 
@@ -211,6 +207,11 @@ func (kv *KVServer) applyStateMachine() {
 			if kv.notifyCh[msg.CommandIndex] != nil {
 				kv.notifyCh[msg.CommandIndex] <- msg.CommandTerm
 			}
+
+			if kv.maxraftstate > 0 && kv.maxraftstate < kv.persister.RaftStateSize() {
+				kv.createSnapshot()
+			}
+
 			kv.mu.Unlock()
 
 		} else if msg.SnapshotValid {
@@ -233,18 +234,10 @@ func (kv *KVServer) applyStateMachine() {
 }
 
 func (kv *KVServer) createSnapshot() {
-	for !kv.killed() {
-		kv.mu.Lock()
-		if kv.persister.RaftStateSize() > kv.maxraftstate {
-			w := new(bytes.Buffer)
-			e := labgob.NewEncoder(w)
-			s := SnapshotInfo{kv.db, kv.lastCommand}
-			e.Encode(s)
-			snapshot := w.Bytes()
-			kv.rf.Snapshot(kv.index, snapshot)
-		}
-		kv.mu.Unlock()
-
-		time.Sleep(snapshotInterval * time.Millisecond)
-	}
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	s := SnapshotInfo{kv.db, kv.lastCommand}
+	e.Encode(s)
+	snapshot := w.Bytes()
+	kv.rf.Snapshot(kv.index, snapshot)
 }
