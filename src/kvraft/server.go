@@ -224,8 +224,12 @@ func (kv *KVServer) applyStateMachine() {
 			s := SnapshotInfo{}
 			d.Decode(&s)
 
-			kv.db = s.DB
-			kv.lastCommand = s.LastCommand
+			if s.DB != nil {
+				kv.db = s.DB
+			}
+			if s.LastCommand != nil {
+				kv.lastCommand = s.LastCommand
+			}
 			kv.index = msg.SnapshotIndex
 
 			kv.mu.Unlock()
