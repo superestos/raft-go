@@ -28,7 +28,7 @@ import (
 	"6.824/labgob"
 	"6.824/labrpc"
 
-	"fmt"
+	//"fmt"
 )
 
 const minTimeout = 200
@@ -193,7 +193,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	defer rf.mu.Unlock()
 
 	if lastIncludedIndex <= rf.lastLogIndex && rf.logTerm(lastIncludedIndex) == lastIncludedTerm {
-		rf.trimLog(lastIncludedIndex + 1, rf.lastLogIndex)
+		//rf.trimLog(lastIncludedIndex + 1, rf.lastLogIndex)
+		return false
 	} else {
 		rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
 	}
@@ -201,6 +202,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
 	rf.lastIncludedIndex = lastIncludedIndex
+
+	rf.lastApplied = lastIncludedIndex
 
 	rf.saveSnapshot()
 	
@@ -366,9 +369,15 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.becomeFollower(args.Term, args.LeaderId)
 	rf.latestCall = time.Now()
 
+	msg := ApplyMsg{}
+	msg.SnapshotValid = true
+	msg.SnapshotTerm = args.LastIncludedTerm
+	msg.SnapshotIndex = args.LastIncludedIndex
+	msg.Snapshot = args.Data
+
 	rf.mu.Unlock()
 
-	rf.CondInstallSnapshot(args.LastIncludedTerm, args.LastIncludedIndex, args.Data)
+	rf.applyCh <- msg
 }
 
 //
@@ -733,24 +742,13 @@ func (rf *Raft) applyStateMachine() {
 
 			msg := ApplyMsg{}
 			msg.CommandValid = rf.lastApplied >= rf.firstLogIndex
-			msg.SnapshotValid = rf.lastApplied <= rf.lastIncludedIndex
 			if msg.CommandValid {
 				msg.CommandTerm = rf.log[rf.lastApplied].Term
 				msg.CommandIndex = rf.lastApplied
 				msg.Command = rf.log[rf.lastApplied].Command
-
-				if msg.Command == nil {
-					fmt.Println(rf.me, rf.lastIncludedIndex, rf.firstLogIndex, rf.lastLogIndex, rf.lastApplied, rf.log)
-				}
-			} else {
-				msg.SnapshotTerm = rf.lastIncludedTerm
-				msg.SnapshotIndex = rf.lastIncludedIndex
-				msg.Snapshot = rf.snapshot
-
-				rf.lastApplied = rf.lastIncludedIndex
 			}	
 			
-			if !msg.CommandValid && !msg.SnapshotValid {
+			if !msg.CommandValid {
 				rf.lastApplied -= 1
 				break
 			}

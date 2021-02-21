@@ -83,15 +83,17 @@ func (kv *KVServer) readSnapshot(snapshot []byte) {
 	s := SnapshotInfo{}
 	d.Decode(&s)
 
-	if s.DB != nil {
-		kv.db = s.DB
+	if kv.rf.CondInstallSnapshot(s.Term, s.Index, snapshot) {
+		if s.DB != nil {
+			kv.db = s.DB
+		}
+		if s.LastCommand != nil {
+			kv.lastCommand = s.LastCommand
+		}
+	
+		kv.term = s.Term
+		kv.index = s.Index
 	}
-	if s.LastCommand != nil {
-		kv.lastCommand = s.LastCommand
-	}
-
-	kv.term = s.Term
-	kv.index = s.Index
 }
 
 func (kv *KVServer) start(op Op) bool {
@@ -216,7 +218,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	snapshot := persister.ReadSnapshot()
 	kv.readSnapshot(snapshot)
-	kv.rf.CondInstallSnapshot(kv.term, kv.index, snapshot)	
 
 	go kv.applyStateMachine()
 
