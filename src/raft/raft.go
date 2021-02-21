@@ -189,9 +189,8 @@ func (rf *Raft) saveSnapshot() {
 // have more recent info since it communicate the snapshot on applyCh.
 //
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-	//rf.mu.Lock()
-	//defer rf.mu.Unlock()
-	// only call when InstallSnapshot RPC and app init (lock-free)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	if lastIncludedIndex <= rf.lastLogIndex && rf.logTerm(lastIncludedIndex) == lastIncludedTerm {
 		//rf.trimLog(lastIncludedIndex + 1, rf.lastLogIndex)
@@ -370,6 +369,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.becomeFollower(args.Term, args.LeaderId)
 	rf.latestCall = time.Now()
 
+	rf.mu.Unlock()
+
 	msg := ApplyMsg{}
 	msg.SnapshotValid = true
 	msg.SnapshotTerm = args.LastIncludedTerm
@@ -377,8 +378,6 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	msg.Snapshot = args.Data
 
 	rf.applyCh <- msg
-
-	rf.mu.Unlock()
 }
 
 //
