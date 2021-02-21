@@ -53,11 +53,45 @@ type KVServer struct {
 	lastCommand map[int64]int32
 
 	index int
+	term int
 }
 
 type SnapshotInfo struct {
 	DB map[string]string
 	LastCommand map[int64]int32
+
+	Term int
+	Index int
+}
+
+func (kv *KVServer) createSnapshot() {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	s := SnapshotInfo{kv.db, kv.lastCommand, kv.term, kv.index}
+	e.Encode(s)
+	snapshot := w.Bytes()
+	kv.rf.Snapshot(kv.index, snapshot)
+}
+
+func (kv *KVServer) readSnapshot(snapshot []byte) {
+	if snapshot == nil || len(snapshot) < 1{
+		return
+	}
+
+	r := bytes.NewBuffer(snapshot)
+	d := labgob.NewDecoder(r)
+	s := SnapshotInfo{}
+	d.Decode(&s)
+
+	if s.DB != nil {
+		kv.db = s.DB
+	}
+	if s.LastCommand != nil {
+		kv.lastCommand = s.LastCommand
+	}
+
+	kv.term = s.Term
+	kv.index = s.Index
 }
 
 func (kv *KVServer) start(op Op) bool {
@@ -171,17 +205,18 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
-	// You may need initialization code here.
-
-	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
-
-	// You may need initialization code here.
 	kv.persister = persister
 
 	kv.db = make(map[string]string)
 	kv.notifyCh = make(map[int](chan int))
 	kv.lastCommand = make(map[int64]int32)
+
+	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+
+	snapshot := persister.ReadSnapshot()
+	kv.readSnapshot(snapshot)
+	kv.rf.CondInstallSnapshot(kv.term, kv.index, snapshot)	
 
 	go kv.applyStateMachine()
 
@@ -204,6 +239,8 @@ func (kv *KVServer) applyStateMachine() {
 			}
 			
 			kv.index = msg.CommandIndex
+			kv.term = msg.CommandTerm
+
 			if kv.notifyCh[msg.CommandIndex] != nil {
 				kv.notifyCh[msg.CommandIndex] <- msg.CommandTerm
 			}
@@ -218,30 +255,8 @@ func (kv *KVServer) applyStateMachine() {
 			snapshot := msg.Snapshot
 
 			kv.mu.Lock()
-
-			r := bytes.NewBuffer(snapshot)
-			d := labgob.NewDecoder(r)
-			s := SnapshotInfo{}
-			d.Decode(&s)
-
-			if s.DB != nil {
-				kv.db = s.DB
-			}
-			if s.LastCommand != nil {
-				kv.lastCommand = s.LastCommand
-			}
-			kv.index = msg.SnapshotIndex
-
+			kv.readSnapshot(snapshot)
 			kv.mu.Unlock()
 		}
 	}
-}
-
-func (kv *KVServer) createSnapshot() {
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	s := SnapshotInfo{kv.db, kv.lastCommand}
-	e.Encode(s)
-	snapshot := w.Bytes()
-	kv.rf.Snapshot(kv.index, snapshot)
 }
