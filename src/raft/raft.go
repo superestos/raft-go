@@ -131,14 +131,9 @@ func (rf *Raft) trimLog(first int, last int) {
 	for i := last + 1; i < rf.lastLogIndex; i++ {
 		delete(rf.log, i)
 	}
-	
-	if rf.firstLogIndex < first {
-		rf.firstLogIndex = first
-	}
-	if rf.lastLogIndex > last {
-		rf.lastLogIndex = last
-	}
-	
+
+	rf.firstLogIndex = first
+	rf.lastLogIndex = last
 }
 
 type PersistedState struct {
@@ -147,12 +142,6 @@ type PersistedState struct {
 	FirstLogIndex int
 	LastLogIndex int
 	Log map[int]LogEntries
-}
-
-type SnapshotState struct {
-	LastIncludedTerm int
-	LastIncludedIndex int
-	Snapshot []byte
 }
 
 //
@@ -191,28 +180,8 @@ func (rf *Raft) readPersist(data []byte) {
 }
 
 func (rf *Raft) saveSnapshot() {
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	state := SnapshotState{rf.lastIncludedTerm, rf.lastIncludedIndex, rf.snapshot}
-	e.Encode(state)
-	data := w.Bytes()
-	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), data)
+	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), rf.snapshot)
 	rf.persist()
-}
-
-func (rf *Raft) readSnapshot(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
-	}
-	
-	r := bytes.NewBuffer(data)
-	d := labgob.NewDecoder(r)
-	state := SnapshotState{}
-	d.Decode(&state)
-
-	rf.lastIncludedTerm = state.LastIncludedTerm
-	rf.lastIncludedIndex = state.LastIncludedIndex
-	rf.snapshot = state.Snapshot
 }
 
 //
@@ -835,7 +804,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-	rf.readSnapshot(persister.ReadSnapshot())
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
