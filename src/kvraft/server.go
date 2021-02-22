@@ -12,8 +12,7 @@ import (
 	//"fmt"
 )
 
-const commitTimeout = 500
-const snapshotInterval = 50
+const commitTimeout = 300
 
 const Debug = false
 

@@ -31,9 +31,9 @@ import (
 	//"fmt"
 )
 
-const minTimeout = 200
+const electionTimeout = 150
 const heartBeatTime = 100
-const waitResultTime = 30
+const waitResultTime = 5
 const applyInterval = 2
 
 //
@@ -721,7 +721,7 @@ func (rf *Raft) ticker() {
 		prevlatestCall := rf.latestCall
 		rf.mu.Unlock()
 
-		electionTimeout := time.Millisecond * time.Duration(minTimeout + rand.Intn(minTimeout))
+		electionTimeout := time.Millisecond * time.Duration(electionTimeout + rand.Intn(2 * electionTimeout))
 		time.Sleep(electionTimeout - time.Now().Sub(prevlatestCall))
 
 		rf.mu.Lock()
