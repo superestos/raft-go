@@ -27,8 +27,6 @@ import (
 
 	"6.824/labgob"
 	"6.824/labrpc"
-
-	//"fmt"
 )
 
 const electionTimeout = 150
@@ -111,11 +109,11 @@ func (rf *Raft) GetState() (int, bool) {
 
 // lock hold
 func (rf *Raft) logTerm(index int) int {
-	// inconsistence of log and snapshot due to crash. Cannot be leader
+	// inconsistence of log and snapshot due to crash
 	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
 		return 0
 	}
-	
+
 	if index >= rf.firstLogIndex {
 		return rf.log[index].Term
 	} else {
@@ -192,8 +190,12 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if lastIncludedIndex <= rf.lastIncludedIndex || (lastIncludedIndex <= rf.lastLogIndex && rf.logTerm(lastIncludedIndex) == lastIncludedTerm) {
+	if lastIncludedIndex <= rf.lastApplied {
 		return false
+	}
+
+	if lastIncludedIndex <= rf.lastLogIndex && rf.logTerm(lastIncludedIndex) == lastIncludedTerm {
+		rf.trimLog(lastIncludedIndex + 1, rf.lastLogIndex)
 	} else {
 		rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
 	}
@@ -204,9 +206,19 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 
 	rf.lastApplied = lastIncludedIndex
 
-	rf.saveSnapshot()
-	
+	rf.saveSnapshot()	
 	return true
+}
+
+func (rf *Raft) InitSnapshot(term int, index int, snapshot []byte) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.snapshot = snapshot
+	rf.lastIncludedTerm = term
+	rf.lastIncludedIndex = index
+
+	rf.lastApplied = index
 }
 
 // the service says it has created a snapshot that has
@@ -633,13 +645,13 @@ func (rf *Raft) becomeCandidate() {
 	rf.votedFor = rf.me
 
 	args := RequestVoteArgs{rf.currentTerm, rf.me, rf.lastLogIndex, rf.logTerm(rf.lastLogIndex)}
+	rf.mu.Unlock()
+
 	for i := 0; i < len(rf.peers); i++ {
 		if i != rf.me {
 			go rf.handleRequestVote(&args, i, &voteCount)
 		}
 	}
-
-	rf.mu.Unlock()
 
 	time.Sleep(waitResultTime * time.Millisecond)
 
