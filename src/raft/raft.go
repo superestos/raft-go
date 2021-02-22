@@ -192,8 +192,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if lastIncludedIndex <= rf.lastLogIndex && rf.logTerm(lastIncludedIndex) == lastIncludedTerm {
-		//rf.trimLog(lastIncludedIndex + 1, rf.lastLogIndex)
+	if lastIncludedIndex <= rf.lastIncludedIndex || (lastIncludedIndex <= rf.lastLogIndex && rf.logTerm(lastIncludedIndex) == lastIncludedTerm) {
 		return false
 	} else {
 		rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
