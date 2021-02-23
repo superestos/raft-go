@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 	"bytes"
-	//"fmt"
 )
 
 const commitTimeout = 300
@@ -100,8 +99,6 @@ func (kv *KVServer) readSnapshot(snapshot []byte, init bool) {
 	
 		kv.term = s.Term
 		kv.index = s.Index
-
-		//fmt.Println(kv.me, kv.index, kv.db["0"][len(kv.db["0"]) - 10:])
 	}
 }
 
@@ -133,7 +130,6 @@ func (kv *KVServer) start(op Op) bool {
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
 	op := Op{args.Key, "", "Get", args.ClerkId, args.CommandId}
 
 	if kv.start(op) {
@@ -153,7 +149,6 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
 	op := Op{args.Key, args.Value, args.Op, args.ClerkId, args.CommandId}
 
 	if kv.start(op) {
