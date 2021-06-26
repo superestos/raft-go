@@ -6,6 +6,9 @@ import "6.824/labrpc"
 import "sync"
 import "6.824/labgob"
 
+import "time"
+
+const commitTimeout = 300
 
 type ShardCtrler struct {
 	mu      sync.Mutex
@@ -15,29 +18,127 @@ type ShardCtrler struct {
 
 	// Your data here.
 
+	notifyCh map[int](chan int)
+	lastCommand map[int64]int32
+
 	configs []Config // indexed by config num
 }
 
 
 type Op struct {
 	// Your data here.
+
+	//Join
+	Servers map[int][]string
+
+	//Leave
+	GIDs []int
+
+	//Move
+	Shard int
+	GID   int
+
+	//Query
+	Num int
+
+	Op    string
+	ClerkId int64
+	CommandId int32
 }
 
+func (sc *ShardCtrler) start(op Op) bool {
+	sc.mu.Lock()
+	index, term, ok := sc.rf.Start(op)
+
+	if ok {
+		ch := make(chan int, 1)
+		sc.notifyCh[index] = ch
+		sc.mu.Unlock()
+
+		defer func() {
+			sc.mu.Lock()
+			delete(sc.notifyCh, index)
+			sc.mu.Unlock()
+		}()
+
+		select {
+		case commandTerm := <-ch:
+			return commandTerm == term
+		case <-time.After(commitTimeout * time.Millisecond):
+		}
+	} else {
+		sc.mu.Unlock()
+	}
+
+	return false
+}
 
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
+	op := Op{}
+	op.Servers = args.Servers
+	op.Op = "Join"
+	op.ClerkId = args.ClerkId
+	op.CommandId = args.CommandId
+
+	if sc.start(op) {
+		reply.WrongLeader = false
+		reply.Err = OK
+	} else {
+		reply.WrongLeader = true
+	}
 }
 
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 	// Your code here.
+	op := Op{}
+	op.GIDs = args.GIDs
+	op.Op = "Leave"
+	op.ClerkId = args.ClerkId
+	op.CommandId = args.CommandId
+
+	if sc.start(op) {
+		reply.WrongLeader = false
+		reply.Err = OK
+	} else {
+		reply.WrongLeader = true
+	}
 }
 
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 	// Your code here.
+	op := Op{}
+	op.Shard = args.Shard
+	op.GID = args.GID
+	op.Op = "Move"
+	op.ClerkId = args.ClerkId
+	op.CommandId = args.CommandId
+
+	if sc.start(op) {
+		reply.WrongLeader = false
+		reply.Err = OK
+	} else {
+		reply.WrongLeader = true
+	}
 }
 
 func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
+	op := Op{}
+	op.Num = args.Num
+	op.Op = "Leave"
+	op.ClerkId = args.ClerkId
+	op.CommandId = args.CommandId
+
+	if sc.start(op) {
+		reply.WrongLeader = false
+		reply.Err = OK
+		sc.mu.Lock()
+		reply.Config = sc.configs[op.Num]
+		sc.mu.Unlock()
+	} else {
+		reply.WrongLeader = true
+	}
 }
 
 
@@ -76,5 +177,41 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 
 	// Your code here.
 
+	sc.notifyCh = make(map[int](chan int))
+	sc.lastCommand = make(map[int64]int32)
+
+	go sc.applyStateMachine()
+
 	return sc
+}
+
+func (sc *ShardCtrler) isDuplicate(clerkId int64, commandId int32) bool {
+	lastCommand, existed := sc.lastCommand[clerkId]
+	if !existed {
+		sc.lastCommand[clerkId] = 0
+		lastCommand = 0
+	}
+	return lastCommand >= commandId
+}
+
+func (sc *ShardCtrler) applyStateMachine() {
+	for msg := range kv.applyCh {
+		if msg.CommandValid {
+			op := msg.Command.(Op)
+
+			sc.mu.Lock()
+			if !sc.isDuplicate(op.ClerkId, op.CommandId) {
+				if op.Op == "Join" {
+					config := sc.configs[len(sc.configs) - 1]
+					config.Num += 1
+					config.Groups = merge(config.Groups, op.Servers)
+				} else if op.Op ==
+			}
+			
+			if sc.notifyCh[msg.CommandIndex] != nil {
+				sc.notifyCh[msg.CommandIndex] <- msg.CommandTerm
+			}
+			sc.mu.Unlock()
+		}
+	}
 }
