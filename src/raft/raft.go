@@ -590,8 +590,6 @@ func (rf *Raft) sendHeartBeat() {
 			}
 		}
 
-		//time.Sleep(heartBeatTime * time.Millisecond)
-
 		<-ticker.C
 	}	
 }
@@ -651,13 +649,15 @@ func (rf *Raft) becomeCandidate() {
 	args := RequestVoteArgs{rf.currentTerm, rf.me, rf.lastLogIndex, rf.logTerm(rf.lastLogIndex)}
 	rf.mu.Unlock()
 
+	ticker := time.NewTicker(waitResultTime * time.Millisecond)
+
 	for i := 0; i < len(rf.peers); i++ {
 		if i != rf.me {
 			go rf.handleRequestVote(&args, i, &voteCount)
 		}
 	}
 
-	time.Sleep(waitResultTime * time.Millisecond)
+	<-ticker.C
 
 	rf.mu.Lock()
 	if voteCount > len(rf.peers) / 2 && args.Term == rf.currentTerm && rf.votedFor == rf.me {
@@ -750,6 +750,8 @@ func (rf *Raft) ticker() {
 }
 
 func (rf *Raft) applyStateMachine() {
+	ticker := time.NewTicker(applyInterval * time.Millisecond)
+
 	for rf.killed() == false {
 		rf.mu.Lock()
 		for rf.commitIndex > rf.lastApplied {
@@ -774,7 +776,7 @@ func (rf *Raft) applyStateMachine() {
 		}
 		rf.mu.Unlock()
 
-		time.Sleep(applyInterval * time.Millisecond)
+		<-ticker.C
 	}
 }
 
