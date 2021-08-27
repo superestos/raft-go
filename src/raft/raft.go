@@ -571,6 +571,8 @@ func (rf *Raft) updateFollowerCommit(leaderCommit int, lastLogIndex int) {
 }
 
 func (rf *Raft) sendHeartBeat() {
+	ticker := time.NewTicker(heartBeatTime * time.Millisecond)
+
 	for !rf.killed() {
 
 		rf.mu.Lock()
@@ -588,7 +590,9 @@ func (rf *Raft) sendHeartBeat() {
 			}
 		}
 
-		time.Sleep(heartBeatTime * time.Millisecond)
+		//time.Sleep(heartBeatTime * time.Millisecond)
+
+		<-ticker.C
 	}	
 }
 
