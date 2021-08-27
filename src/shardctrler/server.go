@@ -8,6 +8,8 @@ import "6.824/labgob"
 
 import "time"
 
+import "fmt"
+
 const commitTimeout = 300
 
 type ShardCtrler struct {
@@ -134,7 +136,11 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 		reply.WrongLeader = false
 		reply.Err = OK
 		sc.mu.Lock()
-		reply.Config = sc.configs[op.Num]
+		if op.Num == -1 || op.Num >= len(sc.configs) {
+			reply.Config = sc.configs[len(sc.configs) - 1]
+		} else {
+			reply.Config = sc.configs[op.Num]
+		}
 		sc.mu.Unlock()
 	} else {
 		reply.WrongLeader = true
@@ -176,6 +182,9 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 
 	// Your code here.
+	for i := 0; i < NShards; i++ {
+		sc.configs[0].Shards[i] = 0
+	}
 
 	sc.notifyCh = make(map[int](chan int))
 	sc.lastCommand = make(map[int64]int32)
@@ -195,19 +204,37 @@ func (sc *ShardCtrler) isDuplicate(clerkId int64, commandId int32) bool {
 }
 
 func (sc *ShardCtrler) applyStateMachine() {
-	for msg := range kv.applyCh {
+	for msg := range sc.applyCh {
 		if msg.CommandValid {
 			op := msg.Command.(Op)
 
 			sc.mu.Lock()
 			if !sc.isDuplicate(op.ClerkId, op.CommandId) {
+				config := sc.configs[len(sc.configs) - 1]
+				config.Num += 1
+
 				if op.Op == "Join" {
-					config := sc.configs[len(sc.configs) - 1]
-					config.Num += 1
-					config.Groups = merge(config.Groups, op.Servers)
-				} else if op.Op ==
+					for k, v := range op.Servers {
+						config.Groups[k] = v
+					}
+				} else if op.Op == "Leave" {
+					for i := 0; i < len(op.GIDs); i++ {
+						delete(config.Groups, op.GIDs[i])
+					}
+				} else if op.Op == "Move" {
+					config.Shards[op.Shard] = op.GID
+				}
+
+				if op.Op != "Query" {
+					sc.configs[len(sc.configs)] = config
+				}
+
+				fmt.Println(config)
+				fmt.Println(sc.configs)
+
+				sc.lastCommand[op.ClerkId] = op.CommandId
 			}
-			
+
 			if sc.notifyCh[msg.CommandIndex] != nil {
 				sc.notifyCh[msg.CommandIndex] <- msg.CommandTerm
 			}
