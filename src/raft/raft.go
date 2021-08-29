@@ -76,6 +76,7 @@ type Raft struct {
 	// state a Raft server must maintain.
 
 	applyCh chan ApplyMsg		  // Message channel to the client
+	notifyCommitCh chan bool
 
 	latestCall time.Time
 
@@ -558,6 +559,7 @@ func (rf *Raft) updateLeaderCommit() {
 
 		if count > len(rf.peers) / 2 {
 			rf.commitIndex = n
+			rf.notifyCommit()
 		} else {
 			break
 		}
@@ -572,6 +574,14 @@ func (rf *Raft) updateFollowerCommit(leaderCommit int, lastLogIndex int) {
 		} else {
 			rf.commitIndex = leaderCommit
 		}
+		rf.notifyCommit()
+	}
+}
+
+func (rf *Raft) notifyCommit() {
+	select {
+		case rf.notifyCommitCh <- true:
+		default:
 	}
 }
 
@@ -779,7 +789,10 @@ func (rf *Raft) applyStateMachine() {
 		}
 		rf.mu.Unlock()
 
-		<-ticker.C
+		select {
+		case <-ticker.C:
+		case <-rf.notifyCommitCh:
+		}
 	}
 }
 
@@ -803,6 +816,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// Your initialization code here (2A, 2B, 2C).
 	rf.applyCh = applyCh
+
+	rf.notifyCommitCh = make(chan bool, 1)
 
 	rf.currentTerm = 0
 	rf.votedFor = -1
