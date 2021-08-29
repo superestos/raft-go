@@ -353,16 +353,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	/*
-	rf.lastLogIndex = args.PrevLogIndex
-	rf.log = append(rf.log[:rf.lastLogIndex + 1 - rf.firstLogIndex], args.Entries...)
-	rf.lastLogIndex += len(args.Entries)
-	*/
-
 	rf.trimLog(rf.firstLogIndex, args.PrevLogIndex)
 	rf.log = append(rf.log, args.Entries...)
 	rf.lastLogIndex += len(args.Entries)
-	//rf.trimLog(rf.firstLogIndex, rf.lastLogIndex + len(args.Entries))
 
 	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
 	rf.persist()
@@ -465,6 +458,7 @@ func (rf *Raft) makeAppendEntriesArgs(prevLogIndex int, numEntries int) AppendEn
 	return args
 }
 
+// lock hold
 func (rf *Raft) appendMatchedLog(server int, numEntries int) {
 	if rf.nextIndex[server] >= rf.firstLogIndex {
 		newArgs := rf.makeAppendEntriesArgs(rf.nextIndex[server] - 1, numEntries)
@@ -499,7 +493,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		}
 
 		if rf.nextIndex[server] <= rf.lastLogIndex {
-			rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
+			rf.appendMatchedLog(server, rf.lastLogIndex - rf.nextIndex[server] + 1)
 		}
 	} else if ok {
 		rf.nextIndex[server] = reply.ConflictIndex
@@ -543,7 +537,7 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 	}
 
 	if rf.nextIndex[server] <= rf.lastLogIndex {
-		rf.appendMatchedLog(server, rf.lastLogIndex - rf.matchIndex[server])
+		rf.appendMatchedLog(server, rf.lastLogIndex - rf.nextIndex[server] + 1)
 	}
 }
 
