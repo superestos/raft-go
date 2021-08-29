@@ -239,6 +239,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	defer rf.mu.Unlock()
 
 	rf.snapshot = snapshot
+	// panic: runtime error: index out of range [15] with length 0
 	rf.lastIncludedTerm = rf.termOfLog(index)
 	rf.lastIncludedIndex = index
 
@@ -762,14 +763,12 @@ func (rf *Raft) applyStateMachine() {
 			rf.lastApplied += 1
 
 			msg := ApplyMsg{}
-			msg.CommandValid = rf.lastApplied >= rf.firstLogIndex
+			msg.CommandValid = rf.lastApplied >= rf.firstLogIndex && rf.lastApplied <= rf.lastLogIndex
 			if msg.CommandValid {
 				msg.CommandTerm = rf.log[rf.lastApplied - rf.firstLogIndex].Term
 				msg.CommandIndex = rf.lastApplied
 				msg.Command = rf.log[rf.lastApplied - rf.firstLogIndex].Command
-			}	
-			
-			if !msg.CommandValid {
+			} else {
 				rf.lastApplied -= 1
 				break
 			}
