@@ -124,14 +124,6 @@ func (rf *Raft) termOfLog(index int) int {
 
 //lock hold
 func (rf *Raft) trimLog(first int, last int) {
-	/*
-	for i := rf.firstLogIndex; i < first; i++ {
-		delete(rf.log, i)
-	}
-	for i := last + 1; i < rf.lastLogIndex; i++ {
-		delete(rf.log, i)
-	}
-	*/
 	start := rf.firstLogIndex
 	if first > rf.firstLogIndex {
 		start = first
@@ -173,7 +165,6 @@ func (rf *Raft) persist() {
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
 }
-
 
 //
 // restore previously persisted state.
@@ -363,16 +354,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	rf.lastLogIndex = args.PrevLogIndex
-	/*
-	rf.log = rf.log[:rf.lastLogIndex + 1 - rf.firstLogIndex]
-
-	
-	for i := 0; i < len(args.Entries); i++ {
-		rf.lastLogIndex += 1
-		//rf.log[rf.lastLogIndex] = args.Entries[i]
-		rf.log = append(rf.log, args.Entries[i])
-	}
-	*/
 
 	rf.log = append(rf.log[:rf.lastLogIndex + 1 - rf.firstLogIndex], args.Entries...)
 	rf.lastLogIndex += len(args.Entries)
@@ -473,13 +454,6 @@ func (rf *Raft) makeAppendEntriesArgs(prevLogIndex int, numEntries int) AppendEn
 	args.LeaderCommit = rf.commitIndex	
 
 	if numEntries > 0 {
-		/*
-		args.Entries = make([]LogEntries, numEntries)
-		for i := 0; i < numEntries; i++ {
-			//args.Entries[i] = rf.log[prevLogIndex + i + 1]
-			args.Entries[i] = rf.log[prevLogIndex + i + 1 - rf.firstLogIndex]
-		}
-		*/
 		args.Entries = rf.log[prevLogIndex + 1 - rf.firstLogIndex: prevLogIndex + numEntries + 1 - rf.firstLogIndex]
 	} else {
 		args.Entries = nil
@@ -793,10 +767,8 @@ func (rf *Raft) applyStateMachine() {
 			msg := ApplyMsg{}
 			msg.CommandValid = rf.lastApplied >= rf.firstLogIndex
 			if msg.CommandValid {
-				//msg.CommandTerm = rf.log[rf.lastApplied].Term
 				msg.CommandTerm = rf.log[rf.lastApplied - rf.firstLogIndex].Term
 				msg.CommandIndex = rf.lastApplied
-				//msg.Command = rf.log[rf.lastApplied].Command
 				msg.Command = rf.log[rf.lastApplied - rf.firstLogIndex].Command
 			}	
 			
