@@ -115,7 +115,6 @@ func (rf *Raft) termOfLog(index int) int {
 	}
 
 	if index >= rf.firstLogIndex {
-		//return rf.log[index].Term
 		return rf.log[index - rf.firstLogIndex].Term
 	} else {
 		return rf.lastIncludedTerm
@@ -136,12 +135,13 @@ func (rf *Raft) trimLog(first int, last int) {
 
 	if start <= end {
 		rf.log = rf.log[start - rf.firstLogIndex : end + 1 - rf.firstLogIndex]
+		rf.firstLogIndex = start
+		rf.lastLogIndex = end
 	} else {
 		rf.log = make([]LogEntries, 0)
-	}
-	
-	rf.firstLogIndex = first
-	rf.lastLogIndex = last
+		rf.firstLogIndex = first
+		rf.lastLogIndex = first - 1
+	}	
 }
 
 type PersistedState struct {
@@ -353,12 +353,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	/*
 	rf.lastLogIndex = args.PrevLogIndex
-
 	rf.log = append(rf.log[:rf.lastLogIndex + 1 - rf.firstLogIndex], args.Entries...)
 	rf.lastLogIndex += len(args.Entries)
+	*/
 
-	rf.trimLog(rf.firstLogIndex, rf.lastLogIndex)
+	rf.trimLog(rf.firstLogIndex, args.PrevLogIndex)
+	rf.log = append(rf.log, args.Entries...)
+	rf.lastLogIndex += len(args.Entries)
+	//rf.trimLog(rf.firstLogIndex, rf.lastLogIndex + len(args.Entries))
 
 	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
 	rf.persist()
@@ -692,7 +696,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	defer func() {
 		if rf.isLeader {
 			rf.lastLogIndex += 1
-			//rf.log[rf.lastLogIndex] = LogEntries{command, rf.currentTerm}
 			rf.log = append(rf.log, LogEntries{command, rf.currentTerm})
 			rf.persist()
 
