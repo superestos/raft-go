@@ -658,16 +658,14 @@ func (rf *Raft) becomeLeader() {
 func (rf *Raft) becomeCandidate() {
 	rf.mu.Lock()
 	rf.currentTerm += 1
-	rf.persist()
-
-	voteCount := 1
 	rf.votedFor = rf.me
-
+	rf.persist()
+	
 	args := RequestVoteArgs{rf.currentTerm, rf.me, rf.lastLogIndex, rf.termOfLog(rf.lastLogIndex)}
 	rf.mu.Unlock()
 
 	ticker := time.NewTicker(waitResultTime * time.Millisecond)
-
+	voteCount := 1
 	for i := 0; i < len(rf.peers); i++ {
 		if i != rf.me {
 			go rf.handleRequestVote(&args, i, &voteCount)
