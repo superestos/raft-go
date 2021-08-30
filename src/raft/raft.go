@@ -359,8 +359,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.log = append(rf.log, args.Entries...)
 	rf.lastLogIndex += len(args.Entries)
 
-	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
 	rf.persist()
+	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
 }
 
 type InstallSnapshotArgs struct {
