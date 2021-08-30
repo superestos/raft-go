@@ -200,11 +200,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if lastIncludedIndex <= rf.lastLogIndex && rf.termOfLog(lastIncludedIndex) == lastIncludedTerm {
-		rf.trimLog(lastIncludedIndex + 1, rf.lastLogIndex)
-	} else {
-		rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
-	}
+	rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
 	
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
@@ -386,6 +382,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.latestCall = time.Now()
 
 	if args.LastIncludedIndex <= rf.lastApplied {
+		rf.mu.Unlock()
+		return
+	}
+
+	if args.LastIncludedIndex <= rf.lastLogIndex && rf.termOfLog(args.LastIncludedIndex) == args.LastIncludedTerm {
 		rf.mu.Unlock()
 		return
 	}
