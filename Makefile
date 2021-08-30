@@ -9,7 +9,7 @@ LABS=" lab1 lab2a lab2b lab2c lab2d lab3a lab3b lab4a lab4b "
 	@echo "Preparing $@-handin.tar.gz"
 	@if echo $(LABS) | grep -q " $@ " ; then \
 		echo "Tarring up your submission..." ; \
-		tar cvzf $@-handin.tar.gz \
+		COPYFILE_DISABLE=1 tar cvzf $@-handin.tar.gz \
 			"--exclude=src/main/pg-*.txt" \
 			"--exclude=src/main/diskvd" \
 			"--exclude=src/mapreduce/824-mrinput-*.txt" \
@@ -28,10 +28,8 @@ LABS=" lab1 lab2a lab2b lab2c lab2d lab3a lab3b lab4a lab4b "
 			read line; \
 			if test "$$line" != "yes" ; then echo "Giving up submission"; exit; fi; \
 			if test `stat -c "%s" "$@-handin.tar.gz" 2>/dev/null || stat -f "%z" "$@-handin.tar.gz"` -ge 20971520 ; then echo "File exceeds 20MB."; exit; fi; \
-			mv api.key api.key.fix ; \
-			cat api.key.fix | tr -d '\n' > api.key ; \
-			rm api.key.fix ; \
-			curl -F file=@$@-handin.tar.gz -F "key=<api.key" \
+			cat api.key | tr -d '\n' > .api.key.trimmed ; \
+			curl --silent --fail --show-error -F file=@$@-handin.tar.gz -F "key=<.api.key.trimmed" \
 			https://6824.scripts.mit.edu/2021/handin.py/upload > /dev/null || { \
 				echo ; \
 				echo "Submit seems to have failed."; \
