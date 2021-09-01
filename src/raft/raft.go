@@ -336,9 +336,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	reply.Success = true
 
-	rf.updateFollowerCommit(args.LeaderCommit, args.PrevLogIndex + len(args.Entries))
-
 	if len(args.Entries) == 0 || (args.PrevLogIndex + len(args.Entries) <= rf.lastLogIndex && rf.termOfLog(args.PrevLogIndex + len(args.Entries)) == args.Entries[len(args.Entries) - 1].Term) {
+		rf.updateFollowerCommit(args.LeaderCommit, args.PrevLogIndex + len(args.Entries))
 		return
 	}
 
@@ -346,7 +345,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.log = append(rf.log, args.Entries...)
 	rf.lastLogIndex += len(args.Entries)
 
-	rf.persist()
 	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
 }
 
@@ -567,12 +565,18 @@ func (rf *Raft) updateLeaderCommit() {
 //lock hold
 func (rf *Raft) updateFollowerCommit(leaderCommit int, lastLogIndex int) {
 	if leaderCommit > rf.commitIndex {
+		prevCommitIndex := rf.commitIndex
+
 		if leaderCommit > lastLogIndex {
 			rf.commitIndex = lastLogIndex
 		} else {
 			rf.commitIndex = leaderCommit
 		}
-		rf.notifyCommit()
+
+		if prevCommitIndex != rf.commitIndex {
+			rf.persist()
+			rf.notifyCommit()
+		}
 	}
 }
 
