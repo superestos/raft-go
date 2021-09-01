@@ -478,7 +478,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		rf.becomeFollower(reply.Term, -1)
 	}
 
-	if !rf.isLeader {
+	if !rf.isLeader || rf.currentTerm != args.Term {
 		return
 	}
 
@@ -523,7 +523,7 @@ func (rf *Raft) handleInstallSnapshot(server int) {
 		rf.becomeFollower(reply.Term, -1)
 	}
 
-	if !rf.isLeader || !ok {
+	if !rf.isLeader || !ok || rf.currentTerm != args.Term {
 		return
 	}
 
@@ -590,10 +590,14 @@ func (rf *Raft) notifyCommit() {
 func (rf *Raft) sendHeartBeat() {
 	ticker := time.NewTicker(heartBeatTime * time.Millisecond)
 
+	rf.mu.Lock()
+	term := rf.currentTerm
+	rf.mu.Unlock()
+
 	for !rf.killed() {
 
 		rf.mu.Lock()
-		if !rf.isLeader {
+		if !rf.isLeader || term != rf.currentTerm {
 			rf.mu.Unlock()
 			break
 		}
@@ -618,7 +622,7 @@ func (rf *Raft) handleRequestVote(args *RequestVoteArgs, server int, voteCount *
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if !ok {
+	if !ok || term != rf.currentTerm {
 		return
 	}
 
