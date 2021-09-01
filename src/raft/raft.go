@@ -209,18 +209,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.saveSnapshot()	
 	return true
 }
-/*
-func (rf *Raft) InitSnapshot(term int, index int, snapshot []byte) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 
-	rf.snapshot = snapshot
-	rf.lastIncludedTerm = term
-	rf.lastIncludedIndex = index
-
-	rf.lastApplied = index
-}
-*/
 // the service says it has created a snapshot that has
 // all info up to and including index. this means the
 // service no longer needs the log through (and including)
@@ -233,6 +222,10 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// panic: runtime error: index out of range [15] with length 0
 	rf.lastIncludedTerm = rf.termOfLog(index)
 	rf.lastIncludedIndex = index
+
+	if rf.lastLogIndex < index || rf.lastApplied < index {
+		DPrintf("Snapshot() trim log, %d, %d, %d\n", rf.lastLogIndex, rf.lastApplied, index)
+	}
 
 	rf.trimLog(index + 1, rf.lastLogIndex)
 
@@ -332,6 +325,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 		reply.ConflictIndex = ind + 1
 
+		if args.PrevLogIndex <= rf.lastApplied {
+			DPrintf("AppendEntries() trim log that applied, %d, %d\n", args.PrevLogIndex - 1, rf.lastApplied)
+		}
+
 		rf.trimLog(rf.firstLogIndex, args.PrevLogIndex - 1)
 		rf.persist()
 		return
@@ -378,16 +375,14 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.becomeFollower(args.Term, args.LeaderId)
 	rf.latestCall = time.Now()
-	/*
-	if args.LastIncludedIndex <= rf.lastApplied {
-		rf.mu.Unlock()
-		return
-	}
-	*/
 
 	if args.LastIncludedIndex <= rf.lastLogIndex && rf.termOfLog(args.LastIncludedIndex) == args.LastIncludedTerm {
 		rf.mu.Unlock()
 		return
+	}
+
+	if args.LastIncludedIndex < rf.lastApplied {
+		DPrintf("InstallSnapshot() trim log that applied, %d, %d\n", args.LastIncludedIndex, rf.lastApplied)
 	}
 
 	rf.trimLog(args.LastIncludedIndex + 1, args.LastIncludedIndex)
