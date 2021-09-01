@@ -71,7 +71,7 @@ func (kv *KVServer) createSnapshot() {
 	kv.rf.Snapshot(kv.index, snapshot)
 }
 
-func (kv *KVServer) readSnapshot(snapshot []byte, init bool) {
+func (kv *KVServer) readSnapshot(snapshot []byte) {
 	if snapshot == nil || len(snapshot) < 1{
 		return
 	}
@@ -81,25 +81,17 @@ func (kv *KVServer) readSnapshot(snapshot []byte, init bool) {
 	s := SnapshotInfo{}
 	d.Decode(&s)
 
-	success := init
+	kv.rf.CondInstallSnapshot(s.Term, s.Index, snapshot)
 
-	if init {
-		kv.rf.InitSnapshot(s.Term, s.Index, snapshot)
-	} else {
-		success = kv.rf.CondInstallSnapshot(s.Term, s.Index, snapshot)
+	if s.DB != nil {
+		kv.db = s.DB
+	}
+	if s.LastCommand != nil {
+		kv.lastCommand = s.LastCommand
 	}
 
-	if success {
-		if s.DB != nil {
-			kv.db = s.DB
-		}
-		if s.LastCommand != nil {
-			kv.lastCommand = s.LastCommand
-		}
-	
-		kv.term = s.Term
-		kv.index = s.Index
-	}
+	kv.term = s.Term
+	kv.index = s.Index
 }
 
 func (kv *KVServer) start(op Op) bool {
@@ -221,7 +213,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	snapshot := persister.ReadSnapshot()
-	kv.readSnapshot(snapshot, true)
+	kv.readSnapshot(snapshot)
 
 	go kv.applyStateMachine()
 
@@ -260,7 +252,7 @@ func (kv *KVServer) applyStateMachine() {
 			snapshot := msg.Snapshot
 
 			kv.mu.Lock()
-			kv.readSnapshot(snapshot, false)
+			kv.readSnapshot(snapshot)
 			kv.mu.Unlock()
 		}
 	}

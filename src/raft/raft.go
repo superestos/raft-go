@@ -199,8 +199,6 @@ func (rf *Raft) saveSnapshot() {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
-	rf.trimLog(lastIncludedIndex + 1, lastIncludedIndex)
 	
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
@@ -211,7 +209,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.saveSnapshot()	
 	return true
 }
-
+/*
 func (rf *Raft) InitSnapshot(term int, index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -222,7 +220,7 @@ func (rf *Raft) InitSnapshot(term int, index int, snapshot []byte) {
 
 	rf.lastApplied = index
 }
-
+*/
 // the service says it has created a snapshot that has
 // all info up to and including index. this means the
 // service no longer needs the log through (and including)
@@ -380,17 +378,19 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.becomeFollower(args.Term, args.LeaderId)
 	rf.latestCall = time.Now()
-
+	/*
 	if args.LastIncludedIndex <= rf.lastApplied {
 		rf.mu.Unlock()
 		return
 	}
+	*/
 
 	if args.LastIncludedIndex <= rf.lastLogIndex && rf.termOfLog(args.LastIncludedIndex) == args.LastIncludedTerm {
 		rf.mu.Unlock()
 		return
 	}
 
+	rf.trimLog(args.LastIncludedIndex + 1, args.LastIncludedIndex)
 	rf.mu.Unlock()
 
 	msg := ApplyMsg{}
@@ -766,8 +766,6 @@ func (rf *Raft) ticker() {
 }
 
 func (rf *Raft) applyStateMachine() {
-	ticker := time.NewTicker(applyInterval * time.Millisecond)
-
 	for rf.killed() == false {
 		rf.mu.Lock()
 		for rf.commitIndex > rf.lastApplied {
@@ -791,8 +789,8 @@ func (rf *Raft) applyStateMachine() {
 		rf.mu.Unlock()
 
 		select {
-		case <-ticker.C:
-		case <-rf.notifyCommitCh:
+		case <- time.After(applyInterval * time.Millisecond):
+		case <- rf.notifyCommitCh:
 		}
 	}
 }
