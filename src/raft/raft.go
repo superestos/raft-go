@@ -622,7 +622,7 @@ func (rf *Raft) handleRequestVote(args *RequestVoteArgs, server int, voteCount *
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if !ok || term != rf.currentTerm {
+	if !ok || args.Term != rf.currentTerm {
 		return
 	}
 
