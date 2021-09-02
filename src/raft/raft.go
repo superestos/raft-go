@@ -344,6 +344,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.trimLog(rf.firstLogIndex, args.PrevLogIndex)
 	rf.log = append(rf.log, args.Entries...)
 	rf.lastLogIndex += len(args.Entries)
+	rf.persist()
 
 	rf.updateFollowerCommit(args.LeaderCommit, rf.lastLogIndex)
 }
@@ -574,7 +575,6 @@ func (rf *Raft) updateFollowerCommit(leaderCommit int, lastLogIndex int) {
 		}
 
 		if prevCommitIndex != rf.commitIndex {
-			rf.persist()
 			rf.notifyCommit()
 		}
 	}
