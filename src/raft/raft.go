@@ -32,7 +32,7 @@ import (
 const electionTimeout = 150
 const heartBeatTime = 100
 const waitResultTime = 5
-const applyInterval = 20
+const applyInterval = 2
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -119,7 +119,7 @@ func (rf *Raft) termOfLog(index int) int {
 
 	if index >= rf.firstLogIndex {
 		return rf.log[index - rf.firstLogIndex].Term
-	} else if index == 0{
+	} else if index == 0 {
 		return 0
 	} else {
 		return rf.lastIncludedTerm
@@ -328,7 +328,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
 		reply.Success = false
 		reply.ConflictTerm = -1
-		reply.ConflictIndex = 1
+		reply.ConflictIndex = rf.lastIncludedIndex + 1
 		return
 	}
 
