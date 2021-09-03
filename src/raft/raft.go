@@ -32,7 +32,7 @@ import (
 const electionTimeout = 150
 const heartBeatTime = 100
 const waitResultTime = 5
-const applyInterval = 2
+const applyInterval = 20
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -119,6 +119,8 @@ func (rf *Raft) termOfLog(index int) int {
 
 	if index >= rf.firstLogIndex {
 		return rf.log[index - rf.firstLogIndex].Term
+	} else if index == 0{
+		return 0
 	} else {
 		return rf.lastIncludedTerm
 	}
@@ -203,7 +205,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	defer rf.mu.Unlock()
 
 	if lastIncludedIndex < rf.lastApplied {
-		DPrintf("Warning: CondInstallSnapshot() try to roll back, %d, %d\n", lastIncludedIndex, rf.lastApplied)
+		DPrintf("Warning: server %d, CondInstallSnapshot() try to roll back, %d, %d\n", rf.me, lastIncludedIndex, rf.lastApplied)
 	}
 	
 	rf.snapshot = snapshot
@@ -230,7 +232,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.lastIncludedIndex = index
 
 	if rf.lastLogIndex < index || rf.lastApplied < index {
-		DPrintf("Warning: Snapshot() trim log, %d, %d, %d\n", rf.lastLogIndex, rf.lastApplied, index)
+		DPrintf("Warning: server %d, Snapshot() trim log, %d, %d, %d\n", rf.me, rf.lastLogIndex, rf.lastApplied, index)
 	}
 
 	rf.trimLog(index + 1, rf.lastLogIndex)
@@ -340,7 +342,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.ConflictIndex = ind + 1
 
 		if args.PrevLogIndex <= rf.lastApplied {
-			DPrintf("Warning: AppendEntries() trim log that applied, %d, %d\n", args.PrevLogIndex - 1, rf.lastApplied)
+			DPrintf("Warning: server %d, AppendEntries() trim log that applied, %d, %d\n", rf.me, args.PrevLogIndex - 1, rf.lastApplied)
 		}
 
 		rf.trimLog(rf.firstLogIndex, args.PrevLogIndex - 1)
@@ -395,7 +397,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 
 	if args.LastIncludedIndex < rf.lastApplied {
-		DPrintf("Warning: InstallSnapshot() trim log that applied, %d, %d\n", args.LastIncludedIndex, rf.lastApplied)
+		DPrintf("Warning: server %d, InstallSnapshot() trim log that applied, %d, %d\n", rf.me, args.LastIncludedIndex, rf.lastApplied)
 	}
 
 	rf.trimLog(args.LastIncludedIndex + 1, args.LastIncludedIndex)
