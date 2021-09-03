@@ -111,9 +111,11 @@ func (rf *Raft) GetState() (int, bool) {
 // lock hold
 func (rf *Raft) termOfLog(index int) int {
 	// inconsistence of log and snapshot due to crash
+	/*
 	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
 		return 0
 	}
+	*/
 
 	if index >= rf.firstLogIndex {
 		return rf.log[index - rf.firstLogIndex].Term
@@ -199,6 +201,10 @@ func (rf *Raft) saveSnapshot() {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	if lastIncludedIndex < rf.lastApplied {
+		DPrintf("Warning: CondInstallSnapshot() try to roll back, %d, %d\n", lastIncludedIndex, rf.lastApplied)
+	}
 	
 	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
@@ -224,7 +230,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.lastIncludedIndex = index
 
 	if rf.lastLogIndex < index || rf.lastApplied < index {
-		DPrintf("Snapshot() trim log, %d, %d, %d\n", rf.lastLogIndex, rf.lastApplied, index)
+		DPrintf("Warning: Snapshot() trim log, %d, %d, %d\n", rf.lastLogIndex, rf.lastApplied, index)
 	}
 
 	rf.trimLog(index + 1, rf.lastLogIndex)
@@ -316,6 +322,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	// inconsistence of log and snapshot due to crash
+	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
+		reply.Success = false
+		reply.ConflictTerm = -1
+		reply.ConflictIndex = 1
+		return
+	}
+
 	if rf.termOfLog(args.PrevLogIndex) != args.PrevLogTerm {
 		reply.Success = false
 		reply.ConflictTerm = rf.termOfLog(args.PrevLogIndex)
@@ -326,7 +340,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.ConflictIndex = ind + 1
 
 		if args.PrevLogIndex <= rf.lastApplied {
-			DPrintf("AppendEntries() trim log that applied, %d, %d\n", args.PrevLogIndex - 1, rf.lastApplied)
+			DPrintf("Warning: AppendEntries() trim log that applied, %d, %d\n", args.PrevLogIndex - 1, rf.lastApplied)
 		}
 
 		rf.trimLog(rf.firstLogIndex, args.PrevLogIndex - 1)
@@ -381,7 +395,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 
 	if args.LastIncludedIndex < rf.lastApplied {
-		DPrintf("InstallSnapshot() trim log that applied, %d, %d\n", args.LastIncludedIndex, rf.lastApplied)
+		DPrintf("Warning: InstallSnapshot() trim log that applied, %d, %d\n", args.LastIncludedIndex, rf.lastApplied)
 	}
 
 	rf.trimLog(args.LastIncludedIndex + 1, args.LastIncludedIndex)
@@ -666,6 +680,12 @@ func (rf *Raft) becomeCandidate() {
 	rf.persist()
 	
 	args := RequestVoteArgs{rf.currentTerm, rf.me, rf.lastLogIndex, rf.termOfLog(rf.lastLogIndex)}
+
+	// inconsistence of log and snapshot due to crash
+	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
+		args.LastLogTerm = 0
+	}
+
 	rf.mu.Unlock()
 
 	ticker := time.NewTicker(waitResultTime * time.Millisecond)
