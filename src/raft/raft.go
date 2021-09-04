@@ -396,6 +396,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), args.Data)
 	rf.persist()
+
+	rf.lastApplied = args.LastIncludedIndex
 	rf.mu.Unlock()
 
 	msg := ApplyMsg{}
