@@ -325,7 +325,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	// inconsistence of log and snapshot due to crash
-	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
+	if rf.lastIncludedIndex + 1 < rf.firstLogIndex && rf.lastIncludedIndex < args.PrevLogIndex {
 		reply.Success = false
 		reply.ConflictTerm = -1
 		reply.ConflictIndex = rf.lastIncludedIndex + 1
@@ -495,7 +495,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		rf.becomeFollower(reply.Term, -1)
 	}
 
-	if !rf.isLeader || rf.currentTerm != args.Term {
+	if !ok || !rf.isLeader || rf.currentTerm != args.Term {
 		return
 	}
 
@@ -510,7 +510,7 @@ func (rf *Raft) handleAppendEntries(server int, args *AppendEntriesArgs) {
 		if rf.nextIndex[server] <= rf.lastLogIndex {
 			rf.appendMatchedLog(server, rf.lastLogIndex - rf.nextIndex[server] + 1)
 		}
-	} else if ok {
+	} else {
 		rf.nextIndex[server] = reply.ConflictIndex
 		if reply.ConflictTerm != -1 {
 			for i := rf.lastLogIndex; i >= rf.firstLogIndex; i-- {
