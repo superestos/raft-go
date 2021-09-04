@@ -96,7 +96,6 @@ type Raft struct {
 
 	lastIncludedIndex int
 	lastIncludedTerm int
-	snapshot []byte
 }
 
 // return currentTerm and whether this server
@@ -191,11 +190,6 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.log = state.Log
 }
 
-func (rf *Raft) saveSnapshot() {
-	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), rf.snapshot)
-	rf.persist()
-}
-
 //
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
@@ -208,13 +202,11 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		DPrintf("Warning: server %d, CondInstallSnapshot() try to roll back, %d, %d\n", rf.me, lastIncludedIndex, rf.lastApplied)
 	}
 	
-	rf.snapshot = snapshot
 	rf.lastIncludedTerm = lastIncludedTerm
 	rf.lastIncludedIndex = lastIncludedIndex
 
 	rf.lastApplied = lastIncludedIndex
 
-	rf.saveSnapshot()	
 	return true
 }
 
@@ -226,8 +218,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	rf.snapshot = snapshot
-	// panic: runtime error: index out of range [15] with length 0
 	rf.lastIncludedTerm = rf.termOfLog(index)
 	rf.lastIncludedIndex = index
 
@@ -237,7 +227,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 	rf.trimLog(index + 1, rf.lastLogIndex)
 
-	rf.saveSnapshot()
+	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
+	rf.persist()
 }
 
 
@@ -401,6 +392,9 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 
 	rf.trimLog(args.LastIncludedIndex + 1, args.LastIncludedIndex)
+
+	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), args.Data)
+	rf.persist()
 	rf.mu.Unlock()
 
 	msg := ApplyMsg{}
