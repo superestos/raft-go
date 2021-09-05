@@ -195,12 +195,12 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	/*
-	if lastIncludedIndex < rf.lastApplied {
-		//DPrintf("Warning: server %d, CondInstallSnapshot() try to roll back, %d, %d\n", rf.me, lastIncludedIndex, rf.lastApplied)
+	
+	if lastIncludedIndex < rf.lastIncludedIndex {
+		DPrintf("Warning: server %d, CondInstallSnapshot() try to roll back, %d, %d\n", rf.me, lastIncludedIndex, rf.lastIncludedIndex)
 		return false
 	}
-	*/
+	
 	rf.lastIncludedTerm = lastIncludedTerm
 	rf.lastIncludedIndex = lastIncludedIndex
 
@@ -220,8 +220,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.lastIncludedTerm = rf.termOfLog(index)
 	rf.lastIncludedIndex = index
 
-	if rf.lastLogIndex < index || rf.lastApplied < index {
-		DPrintf("Warning: server %d, Snapshot() trim log, %d, %d, %d\n", rf.me, rf.lastLogIndex, rf.lastApplied, index)
+	if rf.lastLogIndex < index || rf.lastApplied < index || rf.lastIncludedIndex < index {
+		DPrintf("Warning: server %d, Snapshot() trim log, %d, %d, %d, %d\n", rf.me, rf.lastLogIndex, rf.lastApplied, rf.lastIncludedIndex, index)
 	}
 
 	rf.trimLog(index + 1, rf.lastLogIndex)
