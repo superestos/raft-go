@@ -682,7 +682,8 @@ func (rf *Raft) becomeCandidate() {
 
 	// inconsistence of log and snapshot due to crash
 	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
-		args.LastLogTerm = 0
+		args.LastLogIndex = rf.lastIncludedIndex
+		args.LastLogTerm = rf.lastIncludedTerm
 	}
 
 	rf.mu.Unlock()
