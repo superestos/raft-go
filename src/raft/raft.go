@@ -109,13 +109,6 @@ func (rf *Raft) GetState() (int, bool) {
 
 // lock hold
 func (rf *Raft) termOfLog(index int) int {
-	// inconsistence of log and snapshot due to crash
-	/*
-	if rf.lastIncludedIndex + 1 < rf.firstLogIndex {
-		return 0
-	}
-	*/
-
 	if index >= rf.firstLogIndex {
 		return rf.log[index - rf.firstLogIndex].Term
 	} else if index == 0 {
@@ -170,6 +163,11 @@ func (rf *Raft) persist() {
 	rf.persister.SaveRaftState(data)
 }
 
+func (rf *Raft) saveSnapshot(data []byte) {
+	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), data)
+	rf.persist()
+}
+
 //
 // restore previously persisted state.
 //
@@ -197,12 +195,12 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
+	/*
 	if lastIncludedIndex < rf.lastApplied {
 		//DPrintf("Warning: server %d, CondInstallSnapshot() try to roll back, %d, %d\n", rf.me, lastIncludedIndex, rf.lastApplied)
 		return false
 	}
-	
+	*/
 	rf.lastIncludedTerm = lastIncludedTerm
 	rf.lastIncludedIndex = lastIncludedIndex
 
@@ -228,8 +226,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 	rf.trimLog(index + 1, rf.lastLogIndex)
 
-	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), snapshot)
-	rf.persist()
+	rf.saveSnapshot(snapshot)
 }
 
 
@@ -382,22 +379,25 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.becomeFollower(args.Term, args.LeaderId)
 	rf.latestCall = time.Now()
-
-	if args.LastIncludedIndex <= rf.lastLogIndex && rf.termOfLog(args.LastIncludedIndex) == args.LastIncludedTerm {
+	
+	if args.LastIncludedIndex <= rf.lastIncludedIndex {
 		rf.mu.Unlock()
 		return
 	}
-
-	if args.LastIncludedIndex < rf.lastApplied {
-		DPrintf("Warning: server %d, InstallSnapshot() trim log that applied, %d, %d\n", rf.me, args.LastIncludedIndex, rf.lastApplied)
+	
+	if args.LastIncludedIndex <= rf.lastLogIndex && rf.termOfLog(args.LastIncludedIndex) == args.LastIncludedTerm {
+		rf.trimLog(args.LastIncludedIndex + 1, rf.lastLogIndex)
+		rf.saveSnapshot(args.Data)
+	} else {
+		if args.LastIncludedIndex < rf.lastApplied {
+			DPrintf("Warning: server %d, InstallSnapshot() trim log that applied, %d, %d\n", rf.me, args.LastIncludedIndex, rf.lastApplied)
+		}
+	
+		rf.trimLog(args.LastIncludedIndex + 1, args.LastIncludedIndex)
+		rf.saveSnapshot(args.Data)
 	}
 
-	rf.trimLog(args.LastIncludedIndex + 1, args.LastIncludedIndex)
-
-	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), args.Data)
-	rf.persist()
-
-	rf.lastApplied = args.LastIncludedIndex
+	//rf.lastApplied = args.LastIncludedIndex
 	rf.mu.Unlock()
 
 	msg := ApplyMsg{}
