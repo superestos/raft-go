@@ -197,7 +197,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	defer rf.mu.Unlock()
 	
 	if lastIncludedIndex < rf.lastIncludedIndex {
-		DPrintf("Warning: server %d, CondInstallSnapshot() try to roll back, %d, %d\n", rf.me, lastIncludedIndex, rf.lastIncludedIndex)
+		//DPrintf("Warning: server %d, CondInstallSnapshot() try to roll back, %d, %d\n", rf.me, lastIncludedIndex, rf.lastIncludedIndex)
 		return false
 	}
 	
@@ -397,7 +397,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.saveSnapshot(args.Data)
 	}
 
-	//rf.lastApplied = args.LastIncludedIndex
+	rf.lastIncludedIndex = args.LastIncludedIndex
 	rf.mu.Unlock()
 
 	msg := ApplyMsg{}
