@@ -217,12 +217,16 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	if rf.lastIncludedIndex >= index {
+		return
+	}
+
+	if rf.lastLogIndex < index || rf.lastApplied < index {
+		DPrintf("Warning: server %d, Snapshot() trim log, %d, %d, %d\n", rf.me, rf.lastLogIndex, rf.lastApplied, index)
+	}
+
 	rf.lastIncludedTerm = rf.termOfLog(index)
 	rf.lastIncludedIndex = index
-
-	if rf.lastLogIndex < index || rf.lastApplied < index || rf.lastIncludedIndex < index {
-		DPrintf("Warning: server %d, Snapshot() trim log, %d, %d, %d, %d\n", rf.me, rf.lastLogIndex, rf.lastApplied, rf.lastIncludedIndex, index)
-	}
 
 	rf.trimLog(index + 1, rf.lastLogIndex)
 
