@@ -205,7 +205,9 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.lastIncludedIndex = lastIncludedIndex
 
 	rf.lastApplied = lastIncludedIndex
-
+	rf.saveSnapshot(snapshot)
+	rf.notifyCommit()
+	
 	return true
 }
 
