@@ -168,6 +168,14 @@ func (rf *Raft) saveSnapshot(data []byte) {
 	rf.persist()
 }
 
+type Snapshotinfo struct {
+	DB map[string]string
+	LastCommand map[int64]int32
+
+	Term int
+	Index int
+}
+
 //
 // restore previously persisted state.
 //
@@ -186,6 +194,24 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.firstLogIndex = state.FirstLogIndex
 	rf.lastLogIndex = state.LastLogIndex
 	rf.log = state.Log
+
+	/*
+	if rf.firstLogIndex > 1 {
+		snapshot := rf.persister.ReadSnapshot()
+		if snapshot == nil || len(snapshot) == 0 {
+			DPrintf("Warning: server %d no snapshot and firstLogIndex = %d\n", rf.me, rf.firstLogIndex)
+		}
+
+		r = bytes.NewBuffer(snapshot)
+		d = labgob.NewDecoder(r)
+		info := Snapshotinfo{}
+		d.Decode(&info)
+
+		if info.Index + 1 != rf.firstLogIndex {
+			DPrintf("Warning: server %d have snapshot Index = %d and firstLogIndex = %d\n", rf.me, info.Index, rf.firstLogIndex)
+		}
+	}
+	*/
 }
 
 //
@@ -205,9 +231,11 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.lastIncludedIndex = lastIncludedIndex
 
 	rf.lastApplied = lastIncludedIndex
-	rf.saveSnapshot(snapshot)
+	//rf.saveSnapshot(snapshot)
 	rf.notifyCommit()
 	
+	//DPrintf("server %d install snapshot %d\n", rf.me, lastIncludedIndex)
+
 	return true
 }
 
@@ -403,7 +431,10 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.saveSnapshot(args.Data)
 	}
 
+	//DPrintf("server %d receive snapshot %d\n", rf.me, args.LastIncludedIndex)
+
 	rf.lastIncludedIndex = args.LastIncludedIndex
+	rf.lastIncludedTerm = args.LastIncludedTerm
 	rf.mu.Unlock()
 
 	msg := ApplyMsg{}
