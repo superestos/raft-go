@@ -32,7 +32,7 @@ import (
 const electionTimeout = 150
 const heartBeatTime = 100
 const waitResultTime = 5
-const applyInterval = 2
+const applyInterval = 10
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -631,10 +631,12 @@ func (rf *Raft) updateFollowerCommit(leaderCommit int, lastLogIndex int) {
 }
 
 func (rf *Raft) notifyCommit() {
+	/*
 	select {
 		case rf.notifyCommitCh <- true:
 		default:
 	}
+	*/
 }
 
 func (rf *Raft) sendHeartBeat() {
@@ -688,13 +690,18 @@ func (rf *Raft) handleRequestVote(args *RequestVoteArgs, server int, voteCount *
 
 //lock hold
 func (rf *Raft) becomeFollower(term int, leaderId int) {
+	prevTerm := rf.currentTerm
+	prevVote := rf.votedFor
+
 	rf.isLeader = false
 	rf.currentTerm = term
 	rf.votedFor = leaderId
 	rf.nextIndex = nil
 	rf.matchIndex = nil
 
-	rf.persist()
+	if prevTerm != term || prevVote != leaderId {
+		rf.persist()
+	}
 }
 
 func (rf *Raft) becomeLeader() {
