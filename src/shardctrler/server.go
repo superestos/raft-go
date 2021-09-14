@@ -8,7 +8,7 @@ import "6.824/labgob"
 
 import "time"
 
-import "fmt"
+//import "fmt"
 
 const commitTimeout = 300
 
@@ -205,6 +205,13 @@ func (sc *ShardCtrler) isDuplicate(clerkId int64, commandId int32) bool {
 
 func (sc *ShardCtrler) rebalance(config Config) Config {
 	nGroups := len(config.Groups)
+	if nGroups == 0 {
+		for i := 0; i < NShards; i += 1 {
+			config.Shards[i] = 0
+		}
+	}
+
+
 	i := 0
 	j := 1
 	for shard, _ := range config.Groups {
@@ -222,36 +229,42 @@ func (sc *ShardCtrler) applyStateMachine() {
 		if msg.CommandValid {
 			op := msg.Command.(Op)
 
-			fmt.Println(op)
+			//fmt.Println(op)
 
 			sc.mu.Lock()
 			if !sc.isDuplicate(op.ClerkId, op.CommandId) {
-				config := sc.configs[len(sc.configs) - 1]
-				config.Num += 1
 
-				if op.Op == "Join" {
-					for shard, gid := range op.Servers {
+				if op.Op != "Query" {
+					config := Config{}
+					prevConfig := sc.configs[len(sc.configs) - 1]
+					config.Num = prevConfig.Num + 1
+					config.Groups = make(map[int][]string)
+					for shard, gid := range prevConfig.Groups {
 						config.Groups[shard] = gid
 					}
 
-					config = sc.rebalance(config)
-				} else if op.Op == "Leave" {
-					for i := 0; i < len(op.GIDs); i++ {
-						if _, existed := config.Groups[op.GIDs[i]]; existed {
-							delete(config.Groups, op.GIDs[i])
+					if op.Op == "Join" {
+						for shard, gid := range op.Servers {
+							config.Groups[shard] = gid
 						}
+					} else if op.Op == "Leave" {
+						for i := 0; i < len(op.GIDs); i++ {
+							if _, existed := config.Groups[op.GIDs[i]]; existed {
+								delete(config.Groups, op.GIDs[i])
+							}
+						}
+					} else if op.Op == "Move" {
+						config.Shards[op.Shard] = op.GID
 					}
-					config = sc.rebalance(config)
-				} else if op.Op == "Move" {
-					config.Shards[op.Shard] = op.GID
-					config = sc.rebalance(config)
-				}
 
-				if op.Op != "Query" {
+					config = sc.rebalance(config)
+
 					sc.configs = append(sc.configs, config)
 				}
 
 				sc.lastCommand[op.ClerkId] = op.CommandId
+
+				//fmt.Println(config)
 			}
 
 			//fmt.Println(config)
