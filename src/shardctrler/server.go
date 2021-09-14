@@ -128,7 +128,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
 	op := Op{}
 	op.Num = args.Num
-	op.Op = "Leave"
+	op.Op = "Query"
 	op.ClerkId = args.ClerkId
 	op.CommandId = args.CommandId
 
@@ -203,10 +203,26 @@ func (sc *ShardCtrler) isDuplicate(clerkId int64, commandId int32) bool {
 	return lastCommand >= commandId
 }
 
+func (sc *ShardCtrler) rebalance(config Config) Config {
+	nGroups := len(config.Groups)
+	i := 0
+	j := 1
+	for shard, _ := range config.Groups {
+		for ; i < (j * NShards) / nGroups; i += 1 {
+			config.Shards[i] = shard
+		}
+		j += 1
+	}
+
+	return config
+}
+
 func (sc *ShardCtrler) applyStateMachine() {
 	for msg := range sc.applyCh {
 		if msg.CommandValid {
 			op := msg.Command.(Op)
+
+			fmt.Println(op)
 
 			sc.mu.Lock()
 			if !sc.isDuplicate(op.ClerkId, op.CommandId) {
@@ -214,26 +230,32 @@ func (sc *ShardCtrler) applyStateMachine() {
 				config.Num += 1
 
 				if op.Op == "Join" {
-					for k, v := range op.Servers {
-						config.Groups[k] = v
+					for shard, gid := range op.Servers {
+						config.Groups[shard] = gid
 					}
+
+					config = sc.rebalance(config)
 				} else if op.Op == "Leave" {
 					for i := 0; i < len(op.GIDs); i++ {
-						delete(config.Groups, op.GIDs[i])
+						if _, existed := config.Groups[op.GIDs[i]]; existed {
+							delete(config.Groups, op.GIDs[i])
+						}
 					}
+					config = sc.rebalance(config)
 				} else if op.Op == "Move" {
 					config.Shards[op.Shard] = op.GID
+					config = sc.rebalance(config)
 				}
 
 				if op.Op != "Query" {
-					sc.configs[len(sc.configs)] = config
+					sc.configs = append(sc.configs, config)
 				}
-
-				fmt.Println(config)
-				fmt.Println(sc.configs)
 
 				sc.lastCommand[op.ClerkId] = op.CommandId
 			}
+
+			//fmt.Println(config)
+			//fmt.Println(sc.configs)
 
 			if sc.notifyCh[msg.CommandIndex] != nil {
 				sc.notifyCh[msg.CommandIndex] <- msg.CommandTerm
