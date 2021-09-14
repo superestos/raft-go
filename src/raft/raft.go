@@ -374,12 +374,19 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	reply.Success = true
 
-	if len(args.Entries) == 0 || (args.PrevLogIndex + len(args.Entries) <= rf.lastLogIndex && rf.termOfLog(args.PrevLogIndex + len(args.Entries)) == args.Entries[len(args.Entries) - 1].Term) {
-		rf.updateFollowerCommit(args.LeaderCommit, args.PrevLogIndex + len(args.Entries))
-		return
+	if rf.lastIncludedIndex + 1 >= rf.firstLogIndex {
+		if len(args.Entries) == 0 || (args.PrevLogIndex + len(args.Entries) <= rf.lastLogIndex && rf.termOfLog(args.PrevLogIndex + len(args.Entries)) == args.Entries[len(args.Entries) - 1].Term) {
+			rf.updateFollowerCommit(args.LeaderCommit, args.PrevLogIndex + len(args.Entries))
+			return
+		}
 	}
 
-	rf.trimLog(rf.firstLogIndex, args.PrevLogIndex)
+	if rf.firstLogIndex > args.PrevLogIndex + 1 {
+		rf.trimLog(args.PrevLogIndex + 1, args.PrevLogIndex)
+	} else {
+		rf.trimLog(rf.firstLogIndex, args.PrevLogIndex)
+	}
+
 	rf.log = append(rf.log, args.Entries...)
 	rf.lastLogIndex += len(args.Entries)
 	rf.persist()
@@ -430,8 +437,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		rf.saveSnapshot(args.Data)
 	}
 
-	//DPrintf("server %d receive snapshot %d\n", rf.me, args.LastIncludedIndex)
-
+	//this may make server leader but snapshot not actually applied
 	rf.lastIncludedIndex = args.LastIncludedIndex
 	rf.lastIncludedTerm = args.LastIncludedTerm
 	rf.mu.Unlock()
