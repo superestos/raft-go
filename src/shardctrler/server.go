@@ -7,6 +7,7 @@ import "sync"
 import "6.824/labgob"
 
 import "time"
+import "sort"
 
 //import "fmt"
 
@@ -211,14 +212,19 @@ func (sc *ShardCtrler) rebalance(config Config) Config {
 		}
 	}
 
-
+	gids := make([]int, nGroups)
 	i := 0
-	j := 1
 	for shard, _ := range config.Groups {
+		gids[i] = shard
+		i += 1
+	}
+	sort.Ints(gids)
+
+	i = 0
+	for j := 1; j <= nGroups; j += 1 {
 		for ; i < (j * NShards) / nGroups; i += 1 {
-			config.Shards[i] = shard
+			config.Shards[i] = gids[j - 1]
 		}
-		j += 1
 	}
 
 	return config
@@ -258,16 +264,15 @@ func (sc *ShardCtrler) applyStateMachine() {
 					}
 
 					config = sc.rebalance(config)
-
+					//fmt.Println(config)
 					sc.configs = append(sc.configs, config)
 				}
 
 				sc.lastCommand[op.ClerkId] = op.CommandId
 
-				//fmt.Println(config)
+				
 			}
 
-			//fmt.Println(config)
 			//fmt.Println(sc.configs)
 
 			if sc.notifyCh[msg.CommandIndex] != nil {
