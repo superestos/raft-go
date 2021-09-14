@@ -13,6 +13,7 @@ import "crypto/rand"
 import "math/big"
 import "6.824/shardctrler"
 import "time"
+import "sync/atomic"
 
 //
 // which shard is a key in?
@@ -40,6 +41,9 @@ type Clerk struct {
 	config   shardctrler.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+	me int64
+
+	commandCount int32
 }
 
 //
@@ -56,6 +60,8 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardctrler.MakeClerk(ctrlers)
 	ck.make_end = make_end
 	// You'll have to add code here.
+	ck.me = nrand()
+	ck.commandCount = 0
 	return ck
 }
 
@@ -68,6 +74,10 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 func (ck *Clerk) Get(key string) string {
 	args := GetArgs{}
 	args.Key = key
+
+	commandId := atomic.AddInt32(&ck.commandCount, 1)
+	args.CommandId = commandId
+	args.ClerkId = ck.me
 
 	for {
 		shard := key2shard(key)
@@ -105,6 +115,9 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	args.Value = value
 	args.Op = op
 
+	commandId := atomic.AddInt32(&ck.commandCount, 1)
+	args.CommandId = commandId
+	args.ClerkId = ck.me
 
 	for {
 		shard := key2shard(key)
