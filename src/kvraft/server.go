@@ -13,7 +13,7 @@ import (
 
 const commitTimeout = 300
 
-const Debug = false
+const Debug = true
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
@@ -233,6 +233,10 @@ func (kv *KVServer) applyStateMachine() {
 					kv.db[op.Key] += op.Value
 				}
 				kv.lastCommand[op.ClerkId] = op.CommandId
+			}
+
+			if kv.index + 1 != msg.CommandIndex {
+				DPrintf("Warning: server get unexpected msg, %d, %d\n", kv.index + 1, msg.CommandIndex)
 			}
 			
 			kv.index = msg.CommandIndex

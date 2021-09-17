@@ -420,7 +420,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.becomeFollower(args.Term, args.LeaderId)
 	rf.latestCall = time.Now()
 	
-	if args.LastIncludedIndex <= rf.lastIncludedIndex {
+	if args.LastIncludedIndex <= rf.lastApplied {
 		rf.mu.Unlock()
 		return
 	}
