@@ -3,6 +3,7 @@ package shardkv
 
 import "6.824/labrpc"
 import "6.824/raft"
+import "6.824/shardctrler"
 import "sync"
 import "6.824/labgob"
 import "bytes"
@@ -32,6 +33,8 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	mck *shardctrler.Clerk
+
 	persister *raft.Persister
 
 	db map[string]string
@@ -205,7 +208,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	// Your initialization code here.
 
 	// Use something like this to talk to the shardctrler:
-	// kv.mck = shardctrler.MakeClerk(kv.ctrlers)
+	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 
 	kv.persister = persister
 
