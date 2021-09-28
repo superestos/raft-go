@@ -9,6 +9,8 @@ import "6.824/labgob"
 import "bytes"
 import "time"
 
+import "fmt"
+
 const commitTimeout = 300
 
 type Op struct {
@@ -33,6 +35,7 @@ type ShardKV struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	config shardctrler.Config
 	mck *shardctrler.Clerk
 
 	persister *raft.Persister
@@ -224,7 +227,18 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 
 	go kv.applyStateMachine()
 
+	go kv.detectConfig()
+
 	return kv
+}
+
+func (kv *ShardKV) detectConfig() {
+	for true {
+		config := kv.mck.Query(-1)
+
+		fmt.Println(config)
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 func (kv *ShardKV) applyStateMachine() {
