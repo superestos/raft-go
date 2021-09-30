@@ -204,27 +204,80 @@ func (sc *ShardCtrler) isDuplicate(clerkId int64, commandId int32) bool {
 	return lastCommand >= commandId
 }
 
+func (sc *ShardCtrler) countGID(config Config) (map[int]int, int) {
+	count := 0
+	nGID := make(map[int]int)
+	for gid, _ := range config.Groups {
+		nGID[gid] = 0
+	}
+
+	for i := 0; i < NShards; i += 1{
+		gid := config.Shards[i]
+		n, existed := nGID[gid]
+		if existed {
+			count += 1
+			nGID[gid] = n + 1
+		}
+	}
+
+	return nGID, count
+}
+
+func (sc *ShardCtrler) findMinMaxGID(counts map[int]int, gids []int) (int, int) {
+	nGroups := len(gids)
+
+	minCount := NShards + 1
+	maxCount := -1
+	minGID := 0
+	maxGID := 0
+
+	for i := 0; i < nGroups; i += 1 {
+		if counts[gids[i]] < minCount {
+			minGID = gids[i]
+			minCount = counts[gids[i]]
+		}
+		if counts[gids[i]] > maxCount {
+			maxGID = gids[i]
+			maxCount = counts[gids[i]]
+		}
+	}
+
+	return minGID, maxGID
+}
+
 func (sc *ShardCtrler) rebalance(config Config) Config {
 	nGroups := len(config.Groups)
 	if nGroups == 0 {
-		for i := 0; i < NShards; i += 1 {
-			config.Shards[i] = 0
-		}
+		return config
 	}
 
 	gids := make([]int, nGroups)
 	i := 0
-	for shard, _ := range config.Groups {
-		gids[i] = shard
+	for gid, _ := range config.Groups {
+		gids[i] = gid
 		i += 1
 	}
 	sort.Ints(gids)
+	for i = 0; i < nGroups / 2; i += 1 {
+		temp := gids[i]
+		gids[i] = gids[nGroups - 1 - i]
+		gids[nGroups - 1 - i] = temp
+	}
+	
+	nGID, count := sc.countGID(config)
+	minGID, maxGID := sc.findMinMaxGID(nGID, gids)
 
-	i = 0
-	for j := 1; j <= nGroups; j += 1 {
-		for ; i < (j * NShards) / nGroups; i += 1 {
-			config.Shards[i] = gids[j - 1]
+	for nGID[minGID] + 1 < nGID[maxGID] || count != NShards {
+		for i = 0; i < NShards; i += 1 {
+			_, existed := config.Groups[config.Shards[i]]
+			if !existed || (count == NShards && config.Shards[i] == maxGID) {
+				config.Shards[i] = minGID
+				break
+			}
 		}
+
+		nGID, count = sc.countGID(config)
+		minGID, maxGID = sc.findMinMaxGID(nGID, gids)
 	}
 
 	return config
@@ -235,45 +288,44 @@ func (sc *ShardCtrler) applyStateMachine() {
 		if msg.CommandValid {
 			op := msg.Command.(Op)
 
-			//fmt.Println(op)
-
 			sc.mu.Lock()
 			if !sc.isDuplicate(op.ClerkId, op.CommandId) {
 
 				if op.Op != "Query" {
+
 					config := Config{}
 					prevConfig := sc.configs[len(sc.configs) - 1]
 					config.Num = prevConfig.Num + 1
 					config.Groups = make(map[int][]string)
+
 					for shard, gid := range prevConfig.Groups {
 						config.Groups[shard] = gid
+					}
+					for i := 0; i < NShards; i += 1 {
+						config.Shards[i] = prevConfig.Shards[i]
 					}
 
 					if op.Op == "Join" {
 						for shard, gid := range op.Servers {
 							config.Groups[shard] = gid
 						}
+						config = sc.rebalance(config)
 					} else if op.Op == "Leave" {
 						for i := 0; i < len(op.GIDs); i++ {
 							if _, existed := config.Groups[op.GIDs[i]]; existed {
 								delete(config.Groups, op.GIDs[i])
 							}
 						}
+						config = sc.rebalance(config)
 					} else if op.Op == "Move" {
 						config.Shards[op.Shard] = op.GID
 					}
 
-					config = sc.rebalance(config)
-					//fmt.Println(config)
 					sc.configs = append(sc.configs, config)
 				}
 
 				sc.lastCommand[op.ClerkId] = op.CommandId
-
-				
 			}
-
-			//fmt.Println(sc.configs)
 
 			if sc.notifyCh[msg.CommandIndex] != nil {
 				sc.notifyCh[msg.CommandIndex] <- msg.CommandTerm
