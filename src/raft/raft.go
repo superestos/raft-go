@@ -167,14 +167,6 @@ func (rf *Raft) saveSnapshot(data []byte) {
 	rf.persist()
 }
 
-type Snapshotinfo struct {
-	DB map[string]string
-	LastCommand map[int64]int32
-
-	Term int
-	Index int
-}
-
 //
 // restore previously persisted state.
 //
@@ -193,24 +185,6 @@ func (rf *Raft) readPersist(data []byte) {
 	rf.firstLogIndex = state.FirstLogIndex
 	rf.lastLogIndex = state.LastLogIndex
 	rf.log = state.Log
-
-	/*
-	if rf.firstLogIndex > 1 {
-		snapshot := rf.persister.ReadSnapshot()
-		if snapshot == nil || len(snapshot) == 0 {
-			DPrintf("Warning: server %d no snapshot and firstLogIndex = %d\n", rf.me, rf.firstLogIndex)
-		}
-
-		r = bytes.NewBuffer(snapshot)
-		d = labgob.NewDecoder(r)
-		info := Snapshotinfo{}
-		d.Decode(&info)
-
-		if info.Index + 1 != rf.firstLogIndex {
-			DPrintf("Warning: server %d have snapshot Index = %d and firstLogIndex = %d\n", rf.me, info.Index, rf.firstLogIndex)
-		}
-	}
-	*/
 }
 
 //
@@ -293,7 +267,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.Term = rf.currentTerm
 
-	alreadyVoted := rf.currentTerm == args.Term && (rf.votedFor != -1 || rf.votedFor != args.CandidateId)
+	alreadyVoted := rf.currentTerm == args.Term && (rf.votedFor != -1 && rf.votedFor != args.CandidateId)
 	notUpToDate := (rf.termOfLog(rf.lastLogIndex) > args.LastLogTerm) || (rf.termOfLog(rf.lastLogIndex) == args.LastLogTerm && rf.lastLogIndex > args.LastLogIndex)
 	
 	if rf.currentTerm > args.Term || alreadyVoted || notUpToDate {
