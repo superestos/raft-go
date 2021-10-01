@@ -644,27 +644,6 @@ func (rf *Raft) sendHeartBeat() {
 	}	
 }
 
-func (rf *Raft) handleRequestVote(args *RequestVoteArgs, server int, voteCount *int) {
-	reply := RequestVoteReply{}
-	ok := rf.sendRequestVote(server, args, &reply)
-
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if !ok || args.Term != rf.currentTerm {
-		return
-	}
-
-	if reply.Term > rf.currentTerm {
-		rf.becomeFollower(reply.Term, -1)
-		*voteCount = -len(rf.peers)
-	}
-
-	if reply.VotedGranted {
-		*voteCount += 1
-	}	
-}
-
 //lock hold
 func (rf *Raft) becomeFollower(term int, leaderId int) {
 	prevTerm := rf.currentTerm
@@ -710,17 +689,55 @@ func (rf *Raft) becomeCandidate() {
 	rf.mu.Unlock()
 
 	ticker := time.NewTicker(waitResultTime * time.Millisecond)
-	voteCount := 1
+	voteCh := make(chan int, len(rf.peers))
+	
 	for i := 0; i < len(rf.peers); i++ {
 		if i != rf.me {
-			go rf.handleRequestVote(&args, i, &voteCount)
+			go func(server int){
+				reply := RequestVoteReply{}
+				ok := rf.sendRequestVote(server, &args, &reply)
+
+				rf.mu.Lock()
+				defer rf.mu.Unlock()
+
+				if !ok || args.Term != rf.currentTerm {
+					return
+				}
+
+				if reply.Term > rf.currentTerm {
+					rf.becomeFollower(reply.Term, -1)
+					voteCh <- -1
+				}
+
+				if reply.VotedGranted {
+					voteCh <- 1
+				}	
+			}(i)
 		}
 	}
 
-	<-ticker.C
+	voteCount := 1
+	electionTimeout := false
+
+	for !electionTimeout {
+		select {
+		case vote := <- voteCh:
+			if vote == 1 {
+				voteCount += 1
+			} else {
+				return
+			}
+		case <-ticker.C:
+			electionTimeout = true
+		}
+	}
+
+	if voteCount <= len(rf.peers) / 2 {
+		return
+	}
 
 	rf.mu.Lock()
-	if voteCount > len(rf.peers) / 2 && args.Term == rf.currentTerm && rf.votedFor == rf.me {
+	if args.Term == rf.currentTerm && rf.votedFor == rf.me {
 		rf.becomeLeader()
 	}
 	rf.mu.Unlock()
