@@ -414,7 +414,6 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	//this may make server leader but snapshot not actually applied
 	rf.lastIncludedIndex = args.LastIncludedIndex
 	rf.lastIncludedTerm = args.LastIncludedTerm
-	rf.mu.Unlock()
 
 	msg := ApplyMsg{}
 	msg.SnapshotValid = true
@@ -423,6 +422,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	msg.Snapshot = args.Data
 
 	rf.applyCh <- msg
+	rf.mu.Unlock()
 }
 
 //
